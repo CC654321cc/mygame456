@@ -1,0 +1,2533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>羊村对决 · 双人对打</title>
+<style>
+  :root{
+    --ink:#eaf4ff; --dim:#9fb3d0; --line:rgba(150,210,255,.22);
+    --p1:#4de3ff; --p2:#ff8fc8; --gold:#ffce40; --green:#7ef0c8;
+    --panel:rgba(10,16,28,.86);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;overflow:hidden;background:#08111a}
+  body{color:var(--ink);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;user-select:none}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+
+  .hud{position:fixed;pointer-events:none}
+
+  /* 顶部：双方血条镜像相对 */
+  #top{top:12px;left:0;right:0;display:flex;align-items:flex-start;gap:14px;padding:0 18px}
+  .side{flex:1;display:flex;flex-direction:column;gap:5px}
+  .side.p2{align-items:flex-end}
+  .nameRow{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800}
+  .side.p2 .nameRow{flex-direction:row-reverse}
+  .wins{display:flex;gap:4px}
+  .pip{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--line);background:rgba(255,255,255,.05)}
+  .pip.on{background:var(--gold);border-color:var(--gold);box-shadow:0 0 8px rgba(255,206,64,.8)}
+  .bar{position:relative;height:20px;border-radius:10px;background:rgba(0,0,0,.5);border:1px solid var(--line);overflow:hidden}
+  .bar > i{position:absolute;top:0;bottom:0;width:100%;transition:width .12s linear}
+  .side.p1 .bar > i{left:0;background:linear-gradient(90deg,#2ec5ff,#7ef0c8)}
+  .side.p2 .bar > i{right:0;background:linear-gradient(270deg,#ff5d9e,#ffc2e0)}
+  /* 血条残影（掉血时慢慢收） */
+  .bar > u{position:absolute;top:0;bottom:0;width:100%;background:rgba(255,255,255,.28);transition:width .5s ease .1s}
+  .side.p1 .bar > u{left:0}
+  .side.p2 .bar > u{right:0}
+  .rage{position:relative;height:7px;border-radius:4px;background:rgba(0,0,0,.5);border:1px solid var(--line);overflow:hidden}
+  .rage > i{position:absolute;top:0;bottom:0;width:0;background:linear-gradient(90deg,#ff9d3c,#ffe066)}
+  .side.p1 .rage > i{left:0}
+  .side.p2 .rage > i{right:0}
+  .rage.full > i{box-shadow:0 0 10px rgba(255,206,64,.9)}
+  /* 平底锅技能条：就绪=金色常亮，生效中=橙色闪烁，冷却中=进度回填，不可用=灰暗 */
+  .skill{position:relative;height:7px;border-radius:4px;background:rgba(0,0,0,.5);
+    border:1px solid var(--line);overflow:hidden;margin-top:2px}
+  .skill > i{position:absolute;top:0;bottom:0;width:0;background:linear-gradient(90deg,#ffd24a,#ff9d3c)}
+  .side.p1 .skill > i{left:0}
+  .side.p2 .skill > i{right:0}
+  .skill > span{position:absolute;left:0;right:0;top:-1px;font-size:9px;letter-spacing:.08em;
+    color:#cbd8ea;text-align:center;line-height:9px;text-shadow:0 1px 2px rgba(0,0,0,.9)}
+  .side.p2 .skill > span{text-align:center}
+  .skill.ready > i{width:100% !important;box-shadow:0 0 8px rgba(255,210,74,.9)}
+  .skill.active > i{background:linear-gradient(90deg,#ff7a3c,#ffd24a);animation:panPulse .5s infinite alternate}
+  .skill.off{opacity:.4}
+  .skill.off > i{width:0 !important}
+  @keyframes panPulse{from{opacity:.55}to{opacity:1}}
+  .tag{font-size:10.5px;color:var(--dim);letter-spacing:.1em}
+
+  /* 中央计时 */
+  #timer{top:14px;left:50%;transform:translateX(-50%);text-align:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 16px;
+    font-size:24px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--gold)}
+  #roundTag{position:fixed;top:74px;left:50%;transform:translateX(-50%);
+    font-size:12px;color:var(--dim);letter-spacing:.2em;pointer-events:none}
+
+  /* 提示与飘字 */
+  #toast{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:12;
+    font-size:clamp(22px,5vw,40px);font-weight:900;letter-spacing:.16em;pointer-events:none;
+    opacity:0;transition:opacity .18s;text-shadow:0 4px 20px rgba(0,0,0,.9)}
+  #toast.show{opacity:1}
+
+  /* 面板：模式 / 选角 / 结算 */
+  #panel{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:20;
+    background:rgba(4,9,14,.9);backdrop-filter:blur(6px);overflow:auto;transition:opacity .18s}
+  #panel.hide{opacity:0;pointer-events:none}
+  .sheet{width:min(980px,96vw);padding:22px 22px 26px;text-align:center;
+    background:rgba(10,16,26,.94);border:1px solid var(--line);border-radius:22px;
+    box-shadow:0 26px 70px rgba(0,0,0,.65)}
+  .sheet h1{margin:0 0 4px;font-size:clamp(20px,4.6vw,30px);letter-spacing:.12em;
+    background:linear-gradient(92deg,#8ef0b0,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sheet .sub{font-size:11.5px;color:var(--dim);letter-spacing:.24em;margin-bottom:14px}
+  .sheet p{margin:0 0 12px;font-size:13px;line-height:1.8;color:#c3d4ee}
+  .sheet b{color:var(--gold)}
+
+  .modes{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}
+  .mode{padding:10px 20px;border-radius:14px;cursor:pointer;border:1px solid var(--line);
+    background:rgba(255,255,255,.03);font-size:13px;font-weight:700}
+  .mode:hover{background:rgba(126,240,200,.1)}
+  .mode.sel{border-color:var(--green);background:rgba(126,240,200,.14);box-shadow:0 0 0 1px var(--green) inset}
+
+  .pickwrap{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:start}
+  .pcol{display:flex;flex-direction:column;gap:8px}
+  .pcol .head{font-size:13px;font-weight:800;letter-spacing:.1em}
+  .pcol.p1c .head{color:var(--p1)}
+  .pcol.p2c .head{color:var(--p2)}
+  /* 9 个角色 → 5 列（5 + 4），比 3 列更省高度 */
+  .roster{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  .face{padding:6px 4px;border-radius:12px;cursor:pointer;border:1px solid var(--line);
+    background:rgba(255,255,255,.03);transition:transform .1s}
+  .face:hover{transform:translateY(-2px);background:rgba(255,255,255,.07)}
+  .face.sel{border-color:var(--gold);background:rgba(255,206,64,.12)}
+  .face canvas{display:block;margin:0 auto;border-radius:8px;background:rgba(0,0,0,.2)}
+  .face .fn{font-size:11px;font-weight:700;margin-top:3px}
+  .vs{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding-top:40px;font-size:26px;font-weight:900;color:var(--dim);letter-spacing:.1em}
+  .detail{min-height:56px;font-size:11.5px;color:#a9bdd8;line-height:1.6;text-align:left;
+    background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+  .detail b{color:var(--gold)}
+  .keysBox{font-size:11px;color:#9fb3d0;line-height:1.9;text-align:left;
+    background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+  .keysBox kbd{background:rgba(255,255,255,.08);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:5px;padding:1px 6px;font-family:inherit;font-size:10.5px;color:#dbe9ff}
+
+  .btnrow{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+  .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:800;letter-spacing:.1em;
+    color:#06120e;background:linear-gradient(96deg,var(--green),#8ee9ff);
+    padding:12px 30px;border-radius:999px;box-shadow:0 0 26px rgba(126,240,200,.35)}
+  .btn:hover{transform:translateY(-1px);box-shadow:0 0 36px rgba(126,240,200,.55)}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none;
+    padding:10px 20px;font-size:13px}
+  .btn.ghost:hover{border-color:var(--green);color:var(--green)}
+  .hint{margin-top:12px;font-size:11px;color:#8ba0bb}
+
+  #pauseBtn{position:fixed;right:14px;bottom:14px;z-index:11;
+    background:var(--panel);border:1px solid var(--line);color:var(--ink);
+    border-radius:999px;padding:8px 16px;font:inherit;font-size:12.5px;cursor:pointer}
+  #pauseBtn:hover{border-color:var(--green);color:var(--green)}
+
+  /* 启动遮罩 */
+  #boot{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:#08111a;color:#cfe2ff;font-size:13px;text-align:center;line-height:2}
+  #boot.hide{display:none}
+  #boot .box{max-width:470px;padding:24px 26px;border:1px solid var(--line);border-radius:18px;background:rgba(10,16,26,.92)}
+  #boot b{font-size:15px;color:var(--green)}
+  #boot .err{color:#ff9b9b}
+  @media (max-width:720px){
+    .pickwrap{grid-template-columns:1fr;gap:10px}
+    .vs{padding:0;flex-direction:row}
+    /* 9 个角色在窄屏排成 3 列 3 行 */
+    .roster{grid-template-columns:repeat(3,1fr)}
+  }
+</style>
+</head>
+
+<style>
+  #boot{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:#08111a;color:#cfe2ff;font-size:13px;text-align:center;line-height:2}
+  #boot.hide{display:none}
+  #boot .box{max-width:470px;padding:24px 26px;border:1px solid rgba(150,210,255,.22);
+    border-radius:18px;background:rgba(10,16,26,.92)}
+  #boot .err{color:#ff9b9b}
+</style>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div class="hud" id="top">
+  <div class="side p1">
+    <div class="nameRow"><span id="p1name">玩家 1</span><span class="wins" id="p1wins"></span></div>
+    <div class="bar"><u id="p1ghost"></u><i id="p1hp"></i></div>
+    <div class="rage" id="p1rageWrap"><i id="p1rage"></i></div>
+    <div class="skill" id="p1skillWrap"><i id="p1skill"></i><span id="p1skillTxt">平底锅</span></div>
+    <div class="tag" id="p1tag">生命 / 怒气</div>
+  </div>
+  <div class="side p2">
+    <div class="nameRow"><span id="p2name">玩家 2</span><span class="wins" id="p2wins"></span></div>
+    <div class="bar"><u id="p2ghost"></u><i id="p2hp"></i></div>
+    <div class="rage" id="p2rageWrap"><i id="p2rage"></i></div>
+    <div class="skill" id="p2skillWrap"><i id="p2skill"></i><span id="p2skillTxt">平底锅</span></div>
+    <div class="tag" id="p2tag">生命 / 怒气</div>
+  </div>
+</div>
+
+<div class="hud" id="timer">60</div>
+<div id="roundTag">第 1 局</div>
+<div id="toast"></div>
+<button id="pauseBtn">暂停 (Esc)</button>
+
+<div id="panel"><div class="sheet" id="sheet"></div></div>
+
+
+<div id="boot">
+  <div class="box">
+    <b>正在启动…</b>
+    <p id="bootMsg">如果没有反应，说明代码没有跑起来。</p>
+    <p style="color:#8ba0bb;font-size:11.5px">
+      这是<b>单文件版</b>，双击即可玩，不需要联网、不需要 Node、不需要起服务。<br>
+      若一直停在这里，请按 <b>F12</b> 打开 Console 并把红字发给我。
+    </p>
+  </div>
+</div>
+
+<script>
+  // 启动守卫：主代码跑起来后会派发 yangcun-fight-ready
+  //
+  // 这个守卫刻意用很老的写法（var / function / 不用箭头函数和模板字符串），
+  // 因为它的职责就是"在最恶劣的情况下也能把原因显示出来"——
+  // 如果它自己用了新语法而在老浏览器里挂掉，用户就只会看到一片空白。
+  (function () {
+    var boot = document.getElementById('boot');
+    var msg = document.getElementById('bootMsg');
+    if (!boot || !msg) return;
+    var done = false;
+    var timer = setTimeout(function () {
+      if (done) return;
+      fail('启动超时（10 秒）。代码没有跑完，或运行中抛了错。');
+    }, 10000);
+
+    function fail(text) {
+      done = true;
+      clearTimeout(timer);
+      msg.className = 'err';
+      msg.textContent = text;
+      if (document.getElementById('bootMore')) return;
+      var more = document.createElement('div');
+      more.id = 'bootMore';
+      more.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid rgba(150,210,255,.2)';
+      more.innerHTML = '按 <b>F12</b> 打开 Console，把红色报错发我，我来修。';
+      msg.parentNode.appendChild(more);
+    }
+
+    window.addEventListener('yangcun-fight-ready', function () {
+      done = true; clearTimeout(timer); boot.classList.add('hide');
+    });
+    // 主代码启动时抛错 → 把真实错误显示出来（而不是让用户干等）
+    window.addEventListener('yangcun-fight-bootfail', function (e) {
+      if (done) return;
+      var d = (e && e.detail) || {};
+      fail('启动出错：' + (d.message || '未知错误'));
+      var s = String(d.stack || '').split('\n').slice(0, 4).join('\n');
+      var more = document.getElementById('bootMore');
+      if (more && s) {
+        more.innerHTML = '<div style="text-align:left;font-size:11px;color:#8ba0bb;white-space:pre-wrap">' +
+          s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>' +
+          '<div style="margin-top:8px">把上面这段发我，我来修。</div>';
+      }
+    });
+    window.addEventListener('error', function (e) {
+      if (done) return;
+      var t = (e && e.target && (e.target.src || e.target.href)) || '';
+      fail('加载失败' + (t ? '：' + t : '') + '（' + ((e && e.message) || '资源错误') + '）');
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+      if (done) return;
+      fail('启动出错：' + ((e && e.reason && e.reason.message) || e.reason || '未知错误'));
+    });
+  })();
+</script>
+
+<script>
+/* 单文件版：所有代码内联在这一个页面里（由 build-single.mjs 从四个模块拼接生成）。
+ * 用 IIFE 包住，避免污染全局，也避免各模块的同名声明互相冲突。
+ *
+ * 外面这层 try/catch 是必须的：如果任何一个浏览器 API 抛错
+ * （比如旧浏览器缺某个 canvas 方法、或取不到 2D 上下文），
+ * 整个脚本会崩掉，用户就只会看到“正在启动”而不知道原因。
+ * 这里把真实错误显示到页面上。
+ *
+ * 要改代码请改源文件（fighters / fightersprite / game / main），然后：node build-single.mjs
+ */
+(function () {
+  'use strict';
+  try {
+
+/* ==================== 角色与键位数据（fighters.mjs） ==================== */
+/* 角色数据：9 个 Q 版角色，外观参数供程序化绘制使用，属性决定了打法定位
+ * 纯数据，不依赖 DOM / Canvas。
+ *
+ * 配色说明：下面所有颜色都是从用户提供的参考图上**实测取样**得到的
+ * （见 art/_sampled_colors.json 与 analyze_ref.py 的输出），不是随手定的：
+ *   狼毛 #707070/#808080 · 羊毛 #f5f0e6~#fffdf8 · 羊脸/吻部 #f0d0b0 · 腮红 #e0b0b0
+ *
+ * 属性说明：
+ *   hp        血量倍率（1 = 标准 100 血）
+ *   speed     走/跑速度倍率
+ *   damage    伤害倍率
+ *   defense   受伤倍率（越小越抗打）
+ *   knock     攻击击退倍率（越大越容易把对手推下台）
+ *   grabPower 抓投伤害倍率
+ *   weight    体重（越大越不容易被击退，也越难跳高）
+ */
+
+const ROSTER = [
+  {
+    id: 'xiyangyang',
+    name: '喜羊羊',
+    title: '轻捷剑客',
+    desc: '速度最快，出手短促、连段流畅。适合贴脸打连击',
+    style: 'rush',
+    stats: { hp: 1.0, speed: 1.12, damage: 0.95, defense: 1.0, knock: 0.95, grabPower: 1.0, weight: 1.0 },
+    colors: {
+      kind: 'sheep', bodyColor: '#fffdf8', woolColor: '#fffdf8', faceColor: '#f7ead6',
+      eyeColor: '#2b2118', blush: '#f0b8b8', hornColor: '#e0a060', hoofColor: '#c08850',
+      scarf: '#5fc8f0', band: '#5fc8f0', bell: '#f5c84a'
+    },
+    features: { hornStyle: 'small', scarf: true, bell: true, bigEyes: true }
+  },
+  {
+    id: 'lanyangyang',
+    name: '懒羊羊',
+    title: '惰性坦克',
+    desc: '血厚、抗打，但移动慢。靠站桩硬吃换血',
+    style: 'tank',
+    stats: { hp: 1.22, speed: 0.88, damage: 1.05, defense: 0.86, knock: 1.1, grabPower: 1.15, weight: 1.25 },
+    colors: {
+      kind: 'sheep', bodyColor: '#fffdf8', woolColor: '#fffdf8', faceColor: '#f5d8b8',
+      eyeColor: '#3a2a1c', blush: '#eeb0a8', hornColor: '#e0a060', hoofColor: '#c08850',
+      sleepCap: '#8fa9ff', band: '#8fa9ff'
+    },
+    features: { hornStyle: 'small', sleepyEyes: true, drool: true, chubby: true }
+  },
+  {
+    id: 'meiyangyang',
+    name: '美羊羊',
+    title: '长手快攻',
+    desc: '腿最长、攻击距离最远，靠距离差压制对手',
+    style: 'zoner',
+    stats: { hp: 0.95, speed: 1.02, damage: 1.0, defense: 0.98, knock: 1.0, grabPower: 0.95, weight: 0.95 },
+    colors: {
+      kind: 'sheep', bodyColor: '#fffdf8', woolColor: '#fffdf8', faceColor: '#f7e2d0',
+      eyeColor: '#3a2a1c', blush: '#f0b0b8', hornColor: '#e0a060', hoofColor: '#c08850',
+      bow: '#e87ab0', scarf: '#f5c8dc', band: '#e87ab0'
+    },
+    features: { hornStyle: 'small', bow: true, blush: true, lashes: true, bigEyes: true }
+  },
+  {
+    id: 'feiyangyang',
+    name: '沸羊羊',
+    title: '重拳力士',
+    desc: '伤害最高、防御最硬，但出手慢。一拳定生死',
+    style: 'power',
+    stats: { hp: 1.14, speed: 0.95, damage: 1.22, defense: 0.9, knock: 1.3, grabPower: 1.25, weight: 1.25 },
+    colors: {
+      kind: 'sheep', bodyColor: '#fffdf8', woolColor: '#fffdf8', faceColor: '#f5d8b8',
+      eyeColor: '#2b2118', blush: '#eeb0a8', hornColor: '#e0a060', hoofColor: '#c08850',
+      headband: '#e8564a', shirt: '#f5d86a', band: '#e8564a'
+    },
+    features: { hornStyle: 'small', headband: true, brows: true, muscle: true, shirt: true }
+  },
+  {
+    id: 'xiongda',
+    name: '熊大',
+    title: '均衡守卫',
+    desc: '没有短板，攻守都能打。新手最好上手',
+    style: 'balanced',
+    stats: { hp: 1.18, speed: 0.97, damage: 1.08, defense: 0.94, knock: 1.15, grabPower: 1.1, weight: 1.2 },
+    colors: {
+      kind: 'bear', bodyColor: '#b9752f', bellyColor: '#f0d9b5', fur: '#b9752f',
+      eyeColor: '#2b2118', noseColor: '#3a2a1c', blush: '#e8a0a0', band: '#d8a05b'
+    },
+    features: { ears: 'round', muzzle: true, brows: true, bigEyes: true }
+  },
+  {
+    id: 'xionger',
+    name: '熊二',
+    title: '憨厚摔跤手',
+    desc: '抓投伤害与击退最高，专门把对手扔下台',
+    style: 'grappler',
+    stats: { hp: 1.1, speed: 1.0, damage: 1.0, defense: 0.96, knock: 1.35, grabPower: 1.45, weight: 1.15 },
+    colors: {
+      kind: 'bear', bodyColor: '#d9a05b', bellyColor: '#f5e3c4', fur: '#d9a05b',
+      eyeColor: '#2b2118', noseColor: '#3a2a1c', blush: '#e8a0a0', band: '#c98a4b'
+    },
+    features: { ears: 'round', muzzle: true, tongue: true, bigEyes: true }
+  }
+];
+
+/* 暖羊羊：参考图右下角那只——**褐色脸 + 白羊毛**，体型最大 */
+const NUANYANGYANG = {
+  id: 'nuanyangyang',
+  name: '暖羊羊',
+  title: '温柔巨壁',
+  desc: '体型最大、血最厚、最抗打。伤害一般但站得住，适合硬顶着往前推',
+  style: 'wall',
+  stats: { hp: 1.38, speed: 0.82, damage: 0.98, defense: 0.78, knock: 1.05, grabPower: 1.2, weight: 1.5 },
+  colors: {
+    kind: 'sheep', bodyColor: '#fffdf8', woolColor: '#fffdf8', faceColor: '#a87050',
+    eyeColor: '#2b1c12', blush: '#d89a90', hornColor: '#e0a060', hoofColor: '#8a5838',
+    band: '#5fb0e0', scarf: '#5fb0e0'
+  },
+  features: { hornStyle: 'small', bigBody: true, blush: true, brows: true, scarf: true, darkFace: true }
+};
+
+/* 红太狼：戴皇冠、红裙、紫眼影。脆皮但速度与伤害都很高 */
+const HONGTAILANG = {
+  id: 'hongtailang',
+  name: '红太狼',
+  title: '暴躁女王',
+  desc: '血少但速度与伤害都高，还有最长的攻击距离。压着对手打，一旦被反打就很危险',
+  style: 'queen',
+  stats: { hp: 0.88, speed: 1.18, damage: 1.16, defense: 1.1, knock: 1.15, grabPower: 1.05, weight: 0.88 },
+  colors: {
+    kind: 'wolf', bodyColor: '#808080', woolColor: '#808080', faceColor: '#8c8c8c',
+    eyeColor: '#2b2118', noseColor: '#2b2118', blush: '#e080a0', hoofColor: '#5a5a5a',
+    crown: '#f5c84a', dress: '#c82a38', dressDark: '#96202c', band: '#c82a38',
+    lid: '#b06fd0', tail: '#808080', furTrim: '#f0f0ee'
+  },
+  features: { kindWolf: true, crown: true, dress: true, glaringEyes: true, tail: true, lashes: true }
+};
+
+/* 灰太狼：参考图里那只戴帽子的狼。做成可选角色，这样"红太狼打灰太狼"随时能打出来
+ * （红太狼的平底锅技能只在这个对局里能用）。 */
+const HUITAILANG = {
+  id: 'huitailang',
+  name: '灰太狼',
+  title: '不死小强',
+  desc: '血厚、伤害高、抓投也强，几乎没短板。缺点是出招偏慢，容易被快的角色抢先',
+  style: 'boss',
+  stats: { hp: 1.3, speed: 0.92, damage: 1.2, defense: 0.88, knock: 1.25, grabPower: 1.3, weight: 1.3 },
+  colors: {
+    kind: 'wolf', bodyColor: '#707070', woolColor: '#707070', faceColor: '#7a7a7a',
+    eyeColor: '#2b2118', noseColor: '#1e1e1e', blush: '#d8828a', hoofColor: '#4e4e4e',
+    hat: '#e8a04a', hatBand: '#c8503c', band: '#59a84f',
+    bellyColor: '#f0e6c8', shirt: '#f5d86a', tail: '#707070', furTrim: '#f0f0ee'
+  },
+  features: { kindWolf: true, hat: true, brows: true, tail: true, fangs: true, shirt: true, bigEyes: true }
+};
+
+ROSTER.push(NUANYANGYANG, HONGTAILANG, HUITAILANG);
+
+function getChar(id) {
+  return ROSTER.find(c => c.id === id) || ROSTER[0];
+}
+
+/* 平底锅技能的实际规则定义在 game.mjs 的 PAN 里
+ * （引擎是纯逻辑模块，不依赖本文件，所以规则写在引擎侧；
+ *   这里只记录角色是技能持有者/目标这件事，避免两处定义打架）。 */
+
+/* 把角色数据套进战斗引擎的属性倍率里 */
+function applyStats(f, def) {
+  const st = def.stats;
+  f.hp = f.hpMax = Math.round(100 * st.hp);
+  f.hpMax = Math.round(100 * st.hp);
+  f.speedMul = st.speed;
+  f.damageMul = st.damage;
+  f.defenseMul = st.defense;
+  f.knockMul = st.knock;
+  f.grabMul = st.grabPower;
+  f.weightMul = st.weight;
+  return f;
+}
+
+/* 招式表展示用（选角界面显示各自的特点） */
+const STYLE_LABEL = {
+  rush: '轻快连击',
+  tank: '厚血站桩',
+  zoner: '距离压制',
+  power: '一击重创',
+  balanced: '攻守均衡',
+  grappler: '抓投大师',
+  wall: '超厚血墙',
+  queen: '高速高伤',
+  boss: '全能强敌'
+};
+
+/* 双人键位：刻意分开放在键盘两侧，避免同时按冲突。
+ * pan 是红太狼的平底锅技能（只有对手是灰太狼时才生效）。 */
+const KEYS = {
+  p1: {
+    label: '玩家 1（左手区）',
+    left: 'KeyA', right: 'KeyD', jump: 'KeyW', crouch: 'KeyS',
+    light: 'KeyJ', heavy: 'KeyK', kick: 'KeyL', grab: 'KeyI',
+    block: 'KeyU', dodge: 'KeyY', special: 'KeyH', pan: 'KeyO', run: 'ShiftLeft'
+  },
+  p2: {
+    label: '玩家 2（方向键区）',
+    left: 'ArrowLeft', right: 'ArrowRight', jump: 'ArrowUp', crouch: 'ArrowDown',
+    light: 'Numpad1', heavy: 'Numpad2', kick: 'Numpad3', grab: 'Numpad5',
+    block: 'Numpad4', dodge: 'Numpad7', special: 'Numpad6', pan: 'Numpad8', run: 'ShiftRight'
+  }
+};
+
+/* 键位的可读写法，用于界面提示 */
+const KEY_LABEL = {
+  KeyA: 'A', KeyD: 'D', KeyW: 'W', KeyS: 'S',
+  KeyJ: 'J', KeyK: 'K', KeyL: 'L', KeyI: 'I', KeyU: 'U', KeyY: 'Y', KeyH: 'H', KeyO: 'O',
+  ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓',
+  Numpad1: '小键盘 1', Numpad2: '小键盘 2', Numpad3: '小键盘 3',
+  Numpad4: '小键盘 4', Numpad5: '小键盘 5', Numpad6: '小键盘 6', Numpad7: '小键盘 7',
+  Numpad8: '小键盘 8', Numpad9: '小键盘 9',
+  ShiftLeft: '左 Shift', ShiftRight: '右 Shift'
+};
+
+/* 没有小键盘的键盘，给一套备用键位（P2 用右侧字母区） */
+const KEYS_ALT = {
+  p2: {
+    label: '玩家 2（备用键位，适合没有小键盘的笔记本）',
+    left: 'ArrowLeft', right: 'ArrowRight', jump: 'ArrowUp', crouch: 'ArrowDown',
+    light: 'Comma', heavy: 'Period', kick: 'Slash', grab: 'Semicolon',
+    block: 'KeyM', dodge: 'Quote', special: 'BracketRight', pan: 'Backslash', run: 'ShiftRight'
+  }
+};
+
+Object.assign(KEY_LABEL, {
+  Comma: ',', Period: '.', Slash: '/', Semicolon: ';', KeyM: 'M', Quote: "'",
+  BracketRight: ']', Backslash: '\\'
+});
+
+/* ==================== 程序化绘制（fightersprite.mjs） ==================== */
+/* 程序化绘制：可爱 Q 版萌系角色
+ *
+ * 设计要点（"萌"其实就是这几条的乘积）：
+ *   - 大头：头径约占整个身高的 60%（约 2.5 头身），这是 Q 版的核心
+ *   - 大眼：眼睛直径接近头宽的 1/4，带两颗高光（一颗大一颗小）
+ *   - 圆润：所有部件都是圆角/圆形，四肢粗短、关节有圆头
+ *   - 软：腮红、圆鼻子、w 形嘴、下垂/上挑的眉毛
+ *   - 小：躯干短小，站在大头下面显得更可爱
+ *
+ * 坐标：脚底为原点，y 向上，整体约 1.5 个单位高（乘外部 scale 得到像素）。
+ * 姿态角度沿用 POSES：0 = 竖直向下，正角 = 向角色正面（右）转。
+ * 绘制时对外层做一次 x 取负，让"正角 = 向前伸手"成立。
+ */
+
+const TAU = Math.PI * 2;
+
+/* ===== 身体比例（全部相对"脚底原点、y 向上"） =====
+ * 用户反馈：照着参考图改的"小头+云朵羊毛"版本不好看，已回退到这个
+ * **大头大眼萌系**版本（头径约占身高 60%），这是用户认可的造型。
+ */
+const P = {
+  footY: 0.02,
+  legLen: 0.30,          // 腿长（粗短）
+  legR: 0.115,           // 腿半径（粗）
+  hipY: 0.30,
+  torsoTop: 0.64,        // 肩膀高度
+  headR: 0.44,           // 头半径（很大）
+  headY: 0.64 + 0.42,    // 头心高度
+  armR: 0.10,
+  eyeR: 0.125,           // 眼睛半径
+  eyeYOff: -0.06,        // 眼睛在头心偏下
+  eyeXOff: 0.175
+};
+
+/* ===== 基础图元 ===== */
+
+function circle(ctx, x, y, r, fill) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, TAU);
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function ellipse(ctx, x, y, rx, ry, fill, rot = 0) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, rot, 0, TAU);
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function roundRect(ctx, x, y, w, h, r, fill) {
+  const rr = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+// 圆形描边（用来给眼睛/腮红加轮廓，让造型更"贴纸感"）
+function ring(ctx, x, y, r, lw, color) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, TAU);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+}
+
+/* ===== 零件：眼睛 ===== */
+/* 萌系眼睛 = 深色轮廓 + 白眼球 + 彩色虹膜 + 深瞳 + 大高光 + 小高光 */
+function eye(ctx, x, y, r, c, mode, opt = {}) {
+  const outline = c.eyeLine || '#3a2b22';
+  if (mode === 'closed') {
+    ctx.beginPath();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = r * 0.42;
+    ctx.lineCap = 'round';
+    ctx.moveTo(x - r * 0.85, y + r * 0.1);
+    ctx.quadraticCurveTo(x, y + r * 0.55, x + r * 0.85, y + r * 0.1);
+    ctx.stroke();
+    return;
+  }
+  if (mode === 'happy') {          // ^ ^ 笑眼
+    ctx.beginPath();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = r * 0.45;
+    ctx.lineCap = 'round';
+    ctx.moveTo(x - r * 0.9, y + r * 0.25);
+    ctx.quadraticCurveTo(x, y - r * 0.75, x + r * 0.9, y + r * 0.25);
+    ctx.stroke();
+    return;
+  }
+  if (mode === 'sleepy') {         // 半闭的醉眼
+    ctx.beginPath();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = r * 0.4;
+    ctx.lineCap = 'round';
+    ctx.moveTo(x - r * 0.95, y - r * 0.1);
+    ctx.quadraticCurveTo(x, y + r * 0.7, x + r * 0.95, y - r * 0.1);
+    ctx.stroke();
+    return;
+  }
+  if (mode === 'angry') {          // 上挑的凶眼（保留大眼球，只是压低上眼睑）
+    circle(ctx, x, y, r, '#ffffff');
+    circle(ctx, x, y + r * 0.06, r * 0.74, c.iris || '#2b2118');
+    circle(ctx, x, y + r * 0.12, r * 0.42, '#241b16');
+    circle(ctx, x - r * 0.3, y - r * 0.28, r * 0.24, 'rgba(255,255,255,.95)');
+    circle(ctx, x + r * 0.28, y + r * 0.34, r * 0.13, 'rgba(255,255,255,.8)');
+    // 压低的上眼睑：一个比眼球更大的深色圆，往下压出凶相
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y + r * 1.62, r * 1.15, 0, TAU);
+    ctx.fillStyle = outline;
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  // 默认：圆滚滚的大眼（只用实心填充，干净贴纸风）
+  circle(ctx, x, y, r, '#ffffff');
+  circle(ctx, x, y + r * 0.05, r * 0.78, c.iris || '#3b2a1f');
+  circle(ctx, x, y + r * 0.1, r * 0.5, '#1e1712');
+  circle(ctx, x - r * 0.32, y - r * 0.3, r * 0.28, 'rgba(255,255,255,.97)');
+  circle(ctx, x + r * 0.3, y + r * 0.34, r * 0.15, 'rgba(255,255,255,.85)');
+  if (opt.lashes) {                // 睫毛
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = r * 0.16;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x + r * 0.55, y - r * 0.85);
+    ctx.lineTo(x + r * 1.15, y - r * 1.2);
+    ctx.stroke();
+  }
+}
+
+/* ===== 零件：耳朵 ===== */
+
+/* 羊角：圆润的弯角（回退版：细长上翘，作为头顶装饰） */
+function horns(ctx, hx, hy, r, style, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  const w = style === 'thick' ? r * 0.2 : style === 'big' ? r * 0.19 : r * 0.15;
+  ctx.lineWidth = w;
+  const place = (s, len, curl) => {
+    ctx.beginPath();
+    ctx.moveTo(hx + s * r * 0.52, hy + r * 0.6);
+    ctx.quadraticCurveTo(hx + s * r * (0.95 + curl), hy + r * (0.95 + len),
+                         hx + s * r * (0.72 - curl), hy + r * (1.15 + len * 0.4));
+    ctx.stroke();
+  };
+  if (style === 'curl') { place(-1, 0.16, 0.22); place(1, 0.16, 0.22); }
+  else if (style === 'thick') { place(-1, 0.10, -0.12); place(1, 0.10, -0.12); }
+  else if (style === 'big') { place(-1, 0.30, 0.1); place(1, 0.30, 0.1); }
+  else { place(-1, 0.02, 0.02); place(1, 0.02, 0.02); }
+  ctx.restore();
+}
+
+/* 熊耳：两个圆饼 */
+function bearEars(ctx, hx, hy, r, color, inner) {
+  for (const s of [-1, 1]) {
+    circle(ctx, hx + s * r * 0.72, hy + r * 0.66, r * 0.34, color);
+    circle(ctx, hx + s * r * 0.72, hy + r * 0.66, r * 0.18, inner);
+  }
+}
+
+// 狼耳：尖三角
+function wolfEars(ctx, hx, hy, r, color, inner) {
+  for (const s of [-1, 1]) {
+    const bx = hx + s * r * 0.5, by = hy + r * 0.52;
+    ctx.beginPath();
+    ctx.moveTo(bx - s * r * 0.2, by);
+    ctx.lineTo(bx + s * r * 0.5, by + r * 0.82);
+    ctx.lineTo(bx + s * r * 0.44, by - r * 0.02);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(bx - s * r * 0.02, by + r * 0.1);
+    ctx.lineTo(bx + s * r * 0.32, by + r * 0.6);
+    ctx.lineTo(bx + s * r * 0.3, by + r * 0.08);
+    ctx.closePath();
+    ctx.fillStyle = inner;
+    ctx.fill();
+  }
+}
+
+/* ===== 零件：头饰 ===== */
+
+function crown(ctx, x, y, w, color) {
+  const h = w * 0.42;
+  ctx.beginPath();
+  ctx.moveTo(x - w / 2, y);
+  ctx.lineTo(x - w / 2, y + h * 0.5);
+  ctx.lineTo(x - w * 0.26, y + h * 0.95);
+  ctx.lineTo(x - w * 0.13, y + h * 0.15);
+  ctx.lineTo(x, y + h * 0.8);
+  ctx.lineTo(x + w * 0.13, y + h * 0.15);
+  ctx.lineTo(x + w * 0.26, y + h * 0.95);
+  ctx.lineTo(x + w / 2, y + h * 0.5);
+  ctx.lineTo(x + w / 2, y);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  circle(ctx, x, y + h * 0.62, w * 0.055, '#ff6b81');
+}
+
+function bow(ctx, x, y, s, color) {
+  ellipse(ctx, x - s * 0.62, y, s * 0.62, s * 0.4, color, -0.35);
+  ellipse(ctx, x + s * 0.62, y, s * 0.62, s * 0.4, color, 0.35);
+  circle(ctx, x, y, s * 0.26, color);
+  // 蝴蝶结上的白点
+  circle(ctx, x - s * 0.72, y - s * 0.1, s * 0.13, 'rgba(255,255,255,.85)');
+  circle(ctx, x + s * 0.72, y - s * 0.1, s * 0.13, 'rgba(255,255,255,.85)');
+}
+
+/* ===== 主绘制 ===== */
+
+function drawFighter(ctx, def, x, y, pose, opts = {}) {
+  const p = POSES[pose] || POSES.idle;
+  const c = def.colors;
+  const f = def.features || {};
+  const s = opts.scale || 1;
+  const facing = opts.facing || 1;
+  const t = opts.time || 0;
+  const bulk = f.bigBody ? 1.12 : 1;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s * facing * bulk, -s * bulk);   // y 向上
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const bob = p.bob ? Math.sin(t * 3.4) * 0.018 : 0;
+  const cycle = p.cycle ? Math.sin(t * p.cycle) : 0;
+
+  const limbColor = c.bodyColor;
+  const dark = shade(limbColor, -0.16);
+  const footColor = f.dress ? shade(c.dress, -0.18) : (c.hoofColor || dark);
+
+  // 皮肤/毛色：羊是浅色脸，熊是口鼻色，狼是灰
+  const headColor = c.kind === 'bear' ? limbColor : (c.kind === 'wolf' ? limbColor : (c.faceColor || '#fdf1e3'));
+
+  const armAngle = a => -a;                  // POSES 约定 -> 绘制约定
+  const limb = (x0, y0, a1, a2, l1, l2, r, fill) => {
+    const A1 = armAngle(a1), A2 = armAngle(a1 + a2);
+    const x1 = x0 + Math.cos(A1) * l1, y1 = y0 + Math.sin(A1) * l1;
+    const x2 = x1 + Math.cos(A2) * l2, y2 = y1 + Math.sin(A2) * l2;
+    ctx.save();
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = r * 2;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.lineWidth = r * 1.85;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.restore();
+    circle(ctx, x1, y1, r * 0.98, fill);
+    circle(ctx, x2, y2, r, fill);
+    return { x: x2, y: y2 };
+  };
+
+  const hipY = P.hipY + bob;
+  const chestY = P.torsoTop + bob;
+  const headY = P.headY + bob;
+  const R = P.headR;
+
+  /* ---------- 后侧肢体 ---------- */
+  limb(-0.08, hipY, p.legB[0] + cycle * 0.6, p.legB[1], P.legLen, P.legLen * 0.92, P.legR, shade(footColor, 0.08));
+  limb(-0.10, chestY - 0.04, p.armB[0] - cycle * 0.45, p.armB[1], R * 0.72, R * 0.66, P.armR * 0.95, dark);
+
+  // 尾巴（狼）
+  if (f.tail) {
+    ctx.save();
+    ctx.strokeStyle = c.tail || limbColor;
+    ctx.lineWidth = R * 0.26;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.62, hipY + 0.06);
+    ctx.quadraticCurveTo(-R * 1.25, hipY + 0.3, -R * 1.3, hipY + 0.78);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---------- 躯干（短小圆润） ---------- */
+  ctx.save();
+  ctx.translate(0, hipY);
+  ctx.rotate(-p.lean);
+  ctx.translate(0, -hipY);
+  const torsoH = chestY - hipY + R * 0.5;
+  if (f.dress) {
+    // 红太狼的红裙 + 白色毛领
+    ellipse(ctx, 0, hipY + R * 0.1, R * 0.86, R * 0.44, c.dress);
+    ellipse(ctx, 0, hipY + R * 0.62, R * 0.6, R * 0.36, shade(c.dress, -0.14));
+    if (c.furTrim) {
+      for (const [dx, dy, rr] of [[-0.5, 0.42, 0.2], [0.5, 0.42, 0.2], [0, 0.52, 0.22]]) {
+        circle(ctx, dx * R, hipY + dy * R, rr * R * 0.8, c.furTrim);
+      }
+    }
+  }
+  roundRect(ctx, -R * 0.56, hipY - R * 0.16, R * 1.12, torsoH, R * 0.52, limbColor);
+  if (c.kind === 'bear' || f.dress) {
+    ellipse(ctx, 0, hipY + R * 0.34, R * 0.4, R * 0.4, c.bellyColor || shade(limbColor, 0.24));
+  }
+  if (f.shirt) {
+    // 参考图里喜羊羊/沸羊羊/灰太狼都有上衣
+    roundRect(ctx, -R * 0.54, hipY + R * 0.12, R * 1.08, torsoH * 0.78, R * 0.36, c.shirt);
+  }
+  if (c.kind === 'sheep') {
+    // 羊的毛领：一圈可见轮廓的小圆瓣
+    for (const [dx, dy, rr] of [[-0.44, 0.52, 0.21], [0.44, 0.52, 0.21], [0, 0.64, 0.23],
+                                [-0.3, 0.18, 0.2], [0.3, 0.18, 0.2]]) {
+      circle(ctx, dx * R, hipY + dy * R, rr * R * 0.62, c.woolColor || limbColor);
+    }
+  }
+  if (c.scarf) roundRect(ctx, -R * 0.5, chestY - R * 0.2, R * 1.0, R * 0.26, R * 0.12, c.scarf);
+  // 金铃铛（喜羊羊的标志）
+  if (f.bell) {
+    circle(ctx, 0, chestY - R * 0.34, R * 0.13, c.bell || '#f5c84a');
+    circle(ctx, 0, chestY - R * 0.3, R * 0.05, shade(c.bell || '#f5c84a', -0.3));
+  }
+  ctx.restore();
+
+  /* ---------- 前侧腿 + 前侧手臂 ----------
+   * 顺序很关键：必须在"头"之前画，否则手臂会盖到脸上（大头 Q 版尤其明显）。 */
+  const legColor = f.dress ? shade(c.dress, -0.12) : footColor;
+  limb(0.07, hipY, p.legF[0] - cycle * 0.6, p.legF[1], P.legLen, P.legLen * 0.92, P.legR, legColor);
+  const hand = limb(0.10, chestY - 0.10, p.armF[0] + cycle * 0.45, p.armF[1], R * 0.72, R * 0.66, P.armR, limbColor);
+  if (f.muscle) circle(ctx, hand.x, hand.y, P.armR * 1.25, shade(limbColor, -0.08));
+
+  /* ---------- 头（大） ---------- */
+  ctx.save();
+  ctx.translate(0, hipY);
+  ctx.rotate(-p.lean);
+  ctx.translate(0, -hipY);
+
+  const hx = 0.02;
+
+  // 熊耳/狼耳先画（在头后面，只露出耳廓）
+  if (c.kind === 'bear') bearEars(ctx, hx, headY, R, limbColor, c.bellyColor || shade(limbColor, 0.3));
+  if (c.kind === 'wolf') wolfEars(ctx, hx, headY, R, limbColor, shade(limbColor, 0.3));
+  // 羊角先画（在头后面，从头顶两侧伸出）
+  if (c.kind === 'sheep') horns(ctx, hx, headY, R, f.hornStyle || 'small', c.hornColor || '#e0a060');
+
+  // 头（圆）
+  circle(ctx, hx, headY, R, headColor);
+  // 羊的额前卷毛（回退版：三团卷毛压在头顶，不做成云朵）
+  if (c.kind === 'sheep') {
+    for (const [dx, dy, rr] of [[-0.2, 0.62, 0.26], [0.2, 0.62, 0.26], [0, 0.74, 0.28]]) {
+      circle(ctx, hx + dx * R, headY + dy * R, rr * R, c.woolColor || limbColor);
+    }
+  }
+
+  // 五官布局：眼睛是重点，放在面部下半、尽量大
+  const faceY = headY - R * 0.06;               // 面部中心（比头心略低）
+  const eyeR2 = R * (f.bigEyes ? 0.30 : 0.26);
+  const eyeDX = R * 0.36;
+  const eyeY = faceY + R * 0.02;
+  const eyeMode = p.eyes || 'open';
+  const sleepy = f.sleepyEyes;
+  const mode = (eyeMode === 'open' && sleepy) ? 'sleepy' : eyeMode;
+  const lineColor = c.eyeLine || shade(headColor, -0.62);
+
+  // 口鼻：小熊小狼的"小吻部"，放在面部下半（不能太大，否则糊住整张脸）
+  const snoutY = faceY - R * 0.34;
+  let snoutX = hx;
+  if (c.kind === 'bear' || c.kind === 'wolf') {
+    snoutX = hx + (c.kind === 'wolf' ? R * 0.14 : R * 0.02);
+    const sr = R * (c.kind === 'wolf' ? 0.3 : 0.27);
+    ellipse(ctx, snoutX, snoutY, sr, sr * 0.72,
+            c.kind === 'bear' ? (c.bellyColor || shade(limbColor, 0.34)) : shade(limbColor, 0.28));
+  }
+
+  // 眼睛（画在最上层，保证清晰）
+  eye(ctx, hx - eyeDX, eyeY, eyeR2, c, mode, { lashes: f.lashes });
+  eye(ctx, hx + eyeDX, eyeY, eyeR2, c, mode, { lashes: f.lashes });
+
+  // 红太狼的紫色眼影
+  if (c.lid) {
+    ellipse(ctx, hx - eyeDX, eyeY + eyeR2 * 0.95, eyeR2 * 1.05, eyeR2 * 0.28, c.lid);
+    ellipse(ctx, hx + eyeDX, eyeY + eyeR2 * 0.95, eyeR2 * 1.05, eyeR2 * 0.28, c.lid);
+  }
+
+  // 眉毛（用填充的小色块，不用描边——描边路径在软件 canvas 里容易糊掉整张脸）
+  if (f.brows || eyeMode === 'angry') {
+    const by = eyeY + eyeR2 * 1.42;
+    for (const s2 of [-1, 1]) {
+      const bx = hx + s2 * eyeDX;
+      const tilt = eyeMode === 'angry' ? s2 * R * 0.055 : 0;
+      ctx.save();
+      ctx.translate(bx, by + tilt);
+      ctx.rotate(s2 * (eyeMode === 'angry' ? 0.32 : 0.12));
+      ellipse(ctx, 0, 0, eyeR2 * 0.8, R * 0.035, lineColor);
+      ctx.restore();
+    }
+  }
+
+  // 鼻子 + 嘴
+  if (c.kind === 'bear' || c.kind === 'wolf') {
+    const nx = snoutX - R * 0.06;
+    const ny = snoutY + R * 0.16;
+    ellipse(ctx, nx, ny, R * 0.085, R * 0.065, c.noseColor || '#3a2a1c');
+    if (f.fangs) {
+      // 灰太狼的坏笑：深色嘴 + 白色尖牙（全部用填充）
+      ellipse(ctx, snoutX + R * 0.02, ny - R * 0.2, R * 0.24, R * 0.13, '#4a2b2b');
+      for (const k of [-0.13, 0.09]) {
+        ctx.beginPath();
+        ctx.moveTo(snoutX + k * R, ny - R * 0.16);
+        ctx.lineTo(snoutX + (k + 0.085) * R, ny - R * 0.16);
+        ctx.lineTo(snoutX + (k + 0.042) * R, ny - R * 0.33);
+        ctx.closePath();
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
+    } else {
+      // 小嘴：一个小色块 + 中间一小段竖线（都用填充）
+      ellipse(ctx, snoutX + R * 0.01, ny - R * 0.13, R * 0.075, R * 0.035, lineColor);
+      ellipse(ctx, nx, ny - R * 0.06, R * 0.018, R * 0.05, lineColor);
+    }
+  } else {
+    // 羊：小圆鼻 + 用两段小填充当嘴（不用描边，避免描边路径把脸糊掉）
+    const ny = snoutY + R * 0.1;
+    ellipse(ctx, hx + R * 0.04, ny, R * 0.095, R * 0.075, c.noseColor || '#4a3a2c');
+    // 嘴：两个小色块拼成 w 形（实心，稳）
+    if (eyeMode === 'angry' || f.brows) {
+      ellipse(ctx, hx + R * 0.04, ny - R * 0.16, R * 0.16, R * 0.035, lineColor);
+    } else {
+      ellipse(ctx, hx - R * 0.03, ny - R * 0.13, R * 0.055, R * 0.032, lineColor);
+      ellipse(ctx, hx + R * 0.11, ny - R * 0.13, R * 0.055, R * 0.032, lineColor);
+    }
+  }
+
+  // 腮红（萌系必备）：放在眼睛外侧偏下，别压到眼睛
+  if (c.blush) {
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ellipse(ctx, hx - R * 0.7, eyeY - R * 0.06, R * 0.17, R * 0.1, c.blush);
+    ellipse(ctx, hx + R * 0.7, eyeY - R * 0.06, R * 0.17, R * 0.1, c.blush);
+    ctx.restore();
+  }
+
+  // 头饰
+  if (f.headband) roundRect(ctx, hx - R * 0.92, headY + R * 0.5, R * 1.84, R * 0.22, R * 0.1, c.headband);
+  if (f.crown) crown(ctx, hx + R * 0.02, headY + R * 0.72, R * 1.3, c.crown || '#ffd24a');
+  if (f.hat) {
+    // 灰太狼的帽子
+    ellipse(ctx, hx + R * 0.06, headY + R * 0.78, R * 0.86, R * 0.3, c.hat || '#e2a33c');
+    ellipse(ctx, hx + R * 0.06, headY + R * 0.9, R * 0.6, R * 0.24, c.hatBand || '#b8762a');
+  }
+  if (f.sleepCap) {
+    ctx.beginPath();
+    ctx.moveTo(hx - R * 0.9, headY + R * 0.5);
+    ctx.quadraticCurveTo(hx, headY + R * 1.75, hx + R * 0.95, headY + R * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = c.sleepCap || '#8fa9ff';
+    ctx.fill();
+    circle(ctx, hx + R * 0.16, headY + R * 1.62, R * 0.17, '#ffffff');
+  }
+  if (f.bow) bow(ctx, hx + R * 0.62, headY + R * 0.74, R * 0.3, c.bow || '#ff8fc8');
+  if (f.drool) {
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ellipse(ctx, hx + R * 0.42, headY - R * 0.52, R * 0.06, R * 0.1, 'rgba(150,220,255,.9)');
+    ctx.restore();
+  }
+  ctx.restore();
+
+  /* ---------- 附着特效 ---------- */
+  if (p.guard) {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#8ec8ff';
+    ctx.lineWidth = R * 0.1;
+    ctx.beginPath();
+    ctx.arc(0.16, chestY, R * 0.95, -1.1, 1.1);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (p.sparkle) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(126,240,200,.9)';
+    ctx.lineWidth = R * 0.09;
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.1 + t * 3;
+      ctx.beginPath();
+      ctx.moveTo(hand.x, hand.y);
+      ctx.lineTo(hand.x + Math.cos(a) * R * 0.6, hand.y + Math.sin(a) * R * 0.6);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (p.glow) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    circle(ctx, 0.1, chestY - 0.06, R * 1.5, 'rgba(255,120,60,.5)');
+    ctx.restore();
+  }
+  // 平底锅（红太狼技能）
+  if (opts.panActive) {
+    const swing = (p.armF && p.armF[1] > 1.0) ? -0.5 : -1.1;
+    ctx.save();
+    ctx.globalAlpha = 0.32;
+    circle(ctx, hand.x + R * 0.9, hand.y + R * 0.1, R * 0.9, 'rgba(255,170,70,.5)');
+    ctx.restore();
+    ctx.save();
+    ctx.translate(hand.x, hand.y);
+    ctx.rotate(swing);
+    ctx.strokeStyle = '#5a4636';
+    ctx.lineWidth = R * 0.16;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(R * 0.95, 0); ctx.stroke();
+    const px = R * 1.24;
+    ctx.fillStyle = '#4b4f57';
+    ctx.beginPath(); ctx.ellipse(px, 0, R * 0.46, R * 0.32, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6e737d';
+    ctx.beginPath(); ctx.ellipse(px, 0, R * 0.33, R * 0.22, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* ===== 姿态表 =====
+ * 角度：0 = 竖直向下，正角 = 向角色正面（右）转。
+ * 关键：主动作的"有效帧"要把肢体伸到判定框的位置。
+ */
+const POSES = {
+  idle: {
+    bob: true,
+    armF: [0.35, 0.55], armB: [-0.25, 0.4],
+    legF: [0.12, 0.06], legB: [-0.14, 0.05],
+    lean: 0.02, eyes: 'open'
+  },
+  walk: {
+    cycle: 9,
+    armF: [0.5, 0.8], armB: [-0.4, 0.75],
+    legF: [0.5, 0.12], legB: [-0.42, 0.14],
+    lean: 0.06, eyes: 'open'
+  },
+  jump: {
+    armF: [0.9, 0.7], armB: [-0.8, 0.7],
+    legF: [0.7, 0.5], legB: [-0.5, 0.6],
+    lean: 0.05, eyes: 'open'
+  },
+  lightStartup: { armF: [0.3, 1.1], armB: [-0.5, 0.9], legF: [0.1, 0.1], legB: [-0.15, 0.1], lean: -0.06, eyes: 'open' },
+  lightActive: { armF: [0, 1.62], armB: [-0.7, 0.7], legF: [0.18, 0.08], legB: [-0.22, 0.08], lean: 0.1, eyes: 'angry' },
+  heavyStartup: { armF: [-0.9, 1.3], armB: [-0.9, 0.5], legF: [0.2, 0.15], legB: [-0.3, 0.15], lean: -0.18, eyes: 'angry' },
+  heavyActive: { armF: [0.25, 1.85], armB: [-0.9, 0.5], legF: [0.45, 0.1], legB: [-0.5, 0.1], lean: 0.24, eyes: 'angry' },
+  kickStartup: { armF: [0.6, 0.5], armB: [-0.6, 0.5], legF: [0.5, 0.2], legB: [-0.2, 0.1], lean: -0.12, eyes: 'angry' },
+  kickActive: { armF: [0.9, 0.6], armB: [-0.9, 0.6], legF: [1.5, 0.12], legB: [-0.25, 0.2], lean: -0.26, eyes: 'angry' },
+  airKickActive: {
+    armF: [1.1, 0.5], armB: [-1.1, 0.5],
+    legF: [1.2, 0.2], legB: [0.95, 0.25],
+    lean: -0.2, eyes: 'angry', airborne: true
+  },
+  grabStartup: { armF: [0.2, 1.35], armB: [0.35, 1.3], legF: [0.15, 0.1], legB: [-0.2, 0.1], lean: 0.12, eyes: 'angry' },
+  grabActive: { armF: [0, 1.7], armB: [0.05, 1.66], legF: [0.3, 0.1], legB: [-0.35, 0.1], lean: 0.2, eyes: 'angry' },
+  specialActive: {
+    armF: [-0.5, 2.1], armB: [-0.4, 2.05],
+    legF: [0.5, 0.15], legB: [-0.5, 0.15],
+    lean: -0.1, eyes: 'angry', glow: true
+  },
+  block: {
+    armF: [0.1, 1.5], armB: [-0.1, 1.4],
+    legF: [0.2, 0.1], legB: [-0.25, 0.1],
+    lean: -0.1, eyes: 'open', guard: true
+  },
+  parry: {
+    armF: [-0.3, 1.45], armB: [-0.5, 1.0],
+    legF: [0.15, 0.1], legB: [-0.2, 0.1],
+    lean: -0.14, eyes: 'angry', sparkle: true
+  },
+  dodge: {
+    armF: [1.2, 0.4], armB: [-1.2, 0.4],
+    legF: [0.9, 0.3], legB: [-0.6, 0.5],
+    lean: -0.3, eyes: 'closed', airborne: true
+  },
+  dash: {
+    armF: [1.5, 0.35], armB: [-1.0, 0.6],
+    legF: [0.75, 0.35], legB: [-0.95, 0.2],
+    lean: 0.42, eyes: 'angry', airborne: true
+  },
+  hit: {
+    armF: [1.4, 0.3], armB: [1.2, 0.3],
+    legF: [-0.4, 0.1], legB: [0.3, 0.1],
+    lean: -0.5, eyes: 'closed'
+  },
+  down: {
+    armF: [1.6, 0.2], armB: [1.5, 0.2],
+    legF: [-0.8, 0.1], legB: [0.7, 0.1],
+    lean: -1.1, eyes: 'closed', airborne: true
+  },
+  win: {
+    armF: [2.6, 0.2], armB: [2.4, 0.2],
+    legF: [0.1, 0.08], legB: [-0.1, 0.08],
+    lean: 0.02, eyes: 'happy', bob: true
+  }
+};
+
+/* 根据战斗状态挑姿态 */
+function pickPose(f, now = 0) {
+  if (f.action === 'win') return 'win';
+  if (f.action === 'down') return 'down';
+  if (f.action === 'hit') return 'hit';
+  if (f.action === 'dodge') return 'dodge';
+  if (f.action === 'dash') return 'dash';
+  if (f.action === 'block') return 'block';
+  if (f.action === 'parry') return 'parry';
+
+  const move = f.action;
+  const ph = f.phase;
+  if (move === 'light') return ph === 'active' ? 'lightActive' : (ph === 'startup' ? 'lightStartup' : 'idle');
+  if (move === 'heavy') return ph === 'active' ? 'heavyActive' : (ph === 'startup' ? 'heavyStartup' : 'idle');
+  if (move === 'kick') return ph === 'active' ? 'kickActive' : (ph === 'startup' ? 'kickStartup' : 'idle');
+  if (move === 'airKick') return 'airKickActive';
+  if (move === 'grab') return ph === 'active' ? 'grabActive' : (ph === 'startup' ? 'grabStartup' : 'idle');
+  if (move === 'special') return ph === 'active' ? 'specialActive' : 'grabStartup';
+
+  if (!f.onGround) return 'jump';
+  if (f.action === 'walk') return 'walk';
+  return 'idle';
+}
+
+/* 命中闪白 */
+function drawFighterFlash(ctx, def, x, y, pose, opts = {}) {
+  ctx.save();
+  ctx.globalAlpha = Math.min(0.85, opts.flash || 0);
+  drawFighter(ctx, def, x, y, pose, opts);
+  ctx.restore();
+}
+
+/* ===== 颜色工具 ===== */
+
+const hexCache = new Map();
+function parseHex(hex) {
+  if (hexCache.has(hex)) return hexCache.get(hex);
+  let h = String(hex).replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const n = parseInt(h, 16);
+  const out = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  hexCache.set(hex, out);
+  return out;
+}
+
+function shade(hex, amount) {
+  const [r, g, b] = parseHex(hex);
+  const f = v => Math.max(0, Math.min(255, Math.round(v + (amount > 0 ? (255 - v) * amount : v * amount))));
+  const to2 = v => v.toString(16).padStart(2, '0');
+  return '#' + to2(f(r)) + to2(f(g)) + to2(f(b));
+}
+
+/* 地面影子 */
+function drawShadow(ctx, x, groundY, y, scale) {
+  const h = Math.max(0, groundY - y);
+  const k = Math.max(0.35, 1 - h / 320);
+  ctx.save();
+  ctx.globalAlpha = 0.28 * k;
+  ctx.beginPath();
+  ctx.ellipse(x, groundY, 26 * scale * k, 8 * scale * k, 0, 0, TAU);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ==================== 战斗引擎（game.mjs） ==================== */
+/* 对打游戏 —— 战斗引擎（纯逻辑，不依赖 DOM / Canvas，可在 Node 中测试）
+ *
+ * 坐标系：x 向右，y 向下（和 Canvas 一致）。地面在 GROUND_Y，玩家站在地面上。
+ * 所有判定都用“帧”为单位的时间（秒），招式有起手 / 命中 / 收招三段。
+ */
+
+const WORLD = {
+  w: 900,                 // 场地宽度
+  groundY: 420,           // 地面高度（y 向下，所以越大越靠下）
+  gravity: 2100,
+  // 站台左右边界：站台之外是深坑，掉下去直接判负（不只靠血条赢）
+  stageLeft: 150,
+  stageRight: 750,
+  pitY: 570,              // 掉到这个深度算落台
+  wallLeft: 40,
+  wallRight: 860
+};
+
+/* 某个 x 位置是否有地面（站台范围内才算） */
+function hasFloor(x) {
+  return x >= WORLD.stageLeft && x <= WORLD.stageRight;
+}
+
+const CFG = {
+  walkSpeed: 235,
+  runSpeed: 360,
+  jumpSpeed: 720,
+  airControl: 0.42,
+  // 位移技：后跃（远离）与 前冲（突进），两者都带无敌帧
+  dodgeSpeed: 420,
+  dodgeInvuln: 0.22,
+  dashSpeed: 520,
+  dashInvuln: 0.18,
+  maxHp: 100,
+  roundsToWin: 2,               // 三局两胜
+  roundTime: 60,                // 单局 60 秒
+  hitStop: 0.055,               // 命中停顿
+  blockReduce: 0.22,            // 防御时只吃到 22% 伤害
+  chipDamage: 0.06,             // 防御也会掉一点点血，避免无限龟
+  parryWindow: 0.14,            // 招架窗口
+  parryStun: 0.55,              // 招架成功给对手的硬直
+  grabRange: 64,
+  rageMax: 100,
+  rageOnDeal: 6,
+  rageOnTake: 11,
+  pushback: 120,                // 击退初速
+  friction: 1500,
+  // 受击框：跟着 Q 版造型校准（大头占身高 60%，所以框更宽更矮）
+  bodyRadius: 26,
+  bodyHeight: 96,
+  startGap: 220                 // 双方开局间距
+};
+
+/* 招式表：每个招式定义 起手 / 生效 / 收招 时长与判定框、伤害、硬直
+ * box 相对角色（x 向右为正向，之后按朝向镜像）
+ */
+const MOVES = {
+  light: {
+    name: '轻击', startup: 0.07, active: 0.06, recovery: 0.13,
+    damage: 5, hitStun: 0.20, knock: 90, box: { x: 22, y: -81, w: 56, h: 42 },
+    rageGain: 5, cancelable: true, parry: true
+  },
+  heavy: {
+    name: '重击', startup: 0.19, active: 0.09, recovery: 0.32,
+    damage: 13, hitStun: 0.34, knock: 250, box: { x: 19, y: -97, w: 78, h: 61 },
+    rageGain: 9, parry: true
+  },
+  kick: {
+    name: '腿踢', startup: 0.13, active: 0.08, recovery: 0.24,
+    damage: 10, hitStun: 0.30, knock: 170, box: { x: 17, y: -64, w: 86, h: 47 },
+    rageGain: 8, parry: true
+  },
+  airKick: {
+    name: '飞踢', startup: 0.06, active: 0.26, recovery: 0.10,
+    damage: 12, hitStun: 0.32, knock: 210, box: { x: 11, y: -42, w: 78, h: 56 },
+    rageGain: 8, air: true, parry: true
+  },
+  grab: {
+    name: '抓投', startup: 0.11, active: 0.07, recovery: 0.34,
+    damage: 20, hitStun: 0.52, knock: 430, box: { x: 17, y: -100, w: 61, h: 86 },
+    rageGain: 6, throw: true, ignoresBlock: true, breakableByLight: true
+  },
+  special: {
+    name: '必杀抓投', startup: 0.16, active: 0.12, recovery: 0.42,
+    damage: 32, hitStun: 0.7, knock: 560, box: { x: 14, y: -109, w: 78, h: 103 },
+    rageGain: 0, throw: true, ignoresBlock: true, needsRage: true, unbreakable: true
+  }
+};
+
+/* ===== 角色属性接口 =====
+ * 引擎本身不认识 characters 数据，由外部（或 main/test）显式套用这些倍率。
+ */
+function applyFighterStats(f, st = {}) {
+  f.hpMax = st.hpMax != null ? st.hpMax : CFG.maxHp;
+  f.hp = f.hpMax;
+  f.speedMul = st.speedMul != null ? st.speedMul : 1;
+  f.damageMul = st.damageMul != null ? st.damageMul : 1;
+  f.defenseMul = st.defenseMul != null ? st.defenseMul : 1;
+  f.knockMul = st.knockMul != null ? st.knockMul : 1;
+  f.grabMul = st.grabMul != null ? st.grabMul : 1;
+  f.weightMul = st.weightMul != null ? st.weightMul : 1;
+  return f;
+}
+
+// 伤害 = 招式伤害 × 攻击方加成 × 受击方减伤
+// 抓投类招式额外吃角色的 grabMul（抓投专精），必杀不再叠加
+// 平底锅生效期间，攻击方所有攻击额外增伤（这是红太狼打灰太狼的专属手段）
+function computeDamage(m, attacker, defender) {
+  if (!m) return 0;
+  let dmg = m.damage * (attacker.damageMul || 1) * (defender.defenseMul || 1);
+  if (m.throw && !m.needsRage) dmg *= (attacker.grabMul || 1);
+  if (panActive(attacker)) dmg *= (1 + PAN.damageBonus);
+  return Math.round(dmg * 10) / 10;
+}
+
+// 击退 = 招式击退 × 攻击方击退加成 ÷ 受击方体重
+function computeKnock(m, attacker, defender) {
+  if (!m) return 0;
+  return m.knock * (attacker.knockMul || 1) / (defender.weightMul || 1);
+}
+
+/* ===== 角色状态 ===== */
+
+function createFighter(def, side, x) {
+  return {
+    def,
+    side,                       // 'p1' | 'p2'
+    x, y: WORLD.groundY,
+    vx: 0, vy: 0,
+    facing: side === 'p1' ? 1 : -1,
+    onGround: true,
+    hp: CFG.maxHp,
+    rage: 0,
+    // 动作状态机
+    action: 'idle',             // idle | walk | jump | light | heavy | kick | airKick | grab | special | block | parry | dodge | hit | down | win
+    actionT: 0,
+    phase: '',                  // startup | active | recovery
+    hasHit: false,              // 本次攻击是否已经命中过
+    blockHold: false,
+    parryT: 0,
+    invuln: 0,
+    hitStun: 0,
+    combo: 0,
+    comboT: 0,
+    wins: 0,
+    lastHitBy: null,
+    hurtFlash: 0,
+    landingLag: 0,
+    // 属性倍率默认 1；用 applyFighterStats 套用角色数据
+    hpMax: CFG.maxHp,
+    speedMul: 1, damageMul: 1, defenseMul: 1, knockMul: 1, grabMul: 1, weightMul: 1,
+    // 平底锅技能（红太狼专属，且只在对手是灰太狼时能用）
+    panReady: 0,        // >0 表示正在生效，剩余秒数
+    panCd: 0            // >0 表示冷却中，剩余秒数
+  };
+}
+
+function createMatch(p1def, p2def, opts = {}) {
+  const mid = WORLD.w / 2;
+  const s = {
+    phase: 'intro',             // intro | fight | roundEnd | matchEnd
+    phaseT: 1.2,
+    round: 1,
+    timer: CFG.roundTime,
+    hitStop: 0,
+    shake: 0,
+    p1: createFighter(p1def, 'p1', mid - CFG.startGap / 2),
+    p2: createFighter(p2def, 'p2', mid + CFG.startGap / 2),
+    events: [],
+    winner: null,
+    roundWinner: null,
+    floats: [],
+    particles: []
+  };
+  s.p1.other = s.p2;
+  s.p2.other = s.p1;
+  return s;
+}
+
+/* ===== 工具 ===== */
+
+function activeMove(f) {
+  return MOVES[f.action] || null;
+}
+
+// 取招式当前所处阶段
+function movePhase(f) {
+  const m = activeMove(f);
+  if (!m) return null;
+  const t = f.actionT;
+  if (t < m.startup) return 'startup';
+  if (t < m.startup + m.active) return 'active';
+  if (t < m.startup + m.active + m.recovery) return 'recovery';
+  return 'done';
+}
+
+// 招式的世界判定框（按朝向镜像）
+function moveBox(f) {
+  const m = activeMove(f);
+  if (!m) return null;
+  const b = m.box;
+  const x = f.facing > 0 ? f.x + b.x : f.x - b.x - b.w;
+  return { x, y: f.y + b.y, w: b.w, h: b.h };
+}
+
+function bodyBox(f) {
+  const r = CFG.bodyRadius;
+  const h = CFG.bodyHeight || 100;
+  return { x: f.x - r, y: f.y - h, w: r * 2, h };
+}
+
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/* ===== 输入到动作 ===== */
+
+function canAct(f) {
+  if (f.hitStun > 0 || f.landingLag > 0 || f.action === 'hit' || f.action === 'down' || f.action === 'win') return false;
+  const m = activeMove(f);
+  if (m && f.actionT < m.startup + m.active + m.recovery) {
+    // 轻击可以在收招阶段取消成长击/腿踢，做出连段手感
+    if (m.cancelable && f.actionT >= m.startup + m.active) return true;
+    if (f.hasHit && f.actionT >= m.startup + m.active) return true;
+    return false;
+  }
+  return true;
+}
+
+function tryMove(f, moveKey) {
+  const m = MOVES[moveKey];
+  if (!m) return false;
+  if (m.needsRage && f.rage < CFG.rageMax) return false;
+  if (m.air && f.onGround) return false;
+  if (!m.air && !f.onGround && moveKey !== 'airKick') {
+    // 空中只能出飞踢
+    return false;
+  }
+  if (!canAct(f)) return false;
+  f.action = moveKey;
+  f.actionT = 0;
+  f.hasHit = false;
+  f.phase = 'startup';
+  if (m.needsRage) f.rage = 0;
+  return true;
+}
+
+function tryJump(f) {
+  if (!f.onGround || !canAct(f)) return false;
+  f.vy = -CFG.jumpSpeed * (1 - ((f.weightMul || 1) - 1) * 0.12);
+  f.onGround = false;
+  f.action = 'jump';
+  f.actionT = 0;
+  return true;
+}
+
+/* 闪避 / 前冲（同一个键，按方向区分）
+ *   dir =  0 或未给  → 后跃（远离对手，用来躲招）
+ *   dir =  1        → 前冲（朝对手突进，用来贴脸起手）
+ * 两者都带无敌帧，所以前冲也能用来穿过对手的攻击。
+ */
+function tryDodge(f, dir = 0) {
+  if (!canAct(f) || !f.onGround) return false;
+  const forward = dir > 0;
+  f.action = forward ? 'dash' : 'dodge';
+  f.actionT = 0;
+  f.invuln = forward ? CFG.dashInvuln : CFG.dodgeInvuln;
+  f.vx = (forward ? f.facing : -f.facing) * (forward ? CFG.dashSpeed : CFG.dodgeSpeed);
+  return true;
+}
+
+/* ===== 命中结算 =====
+ * 伤害与击退都经过 computeDamage / computeKnock，
+ * 所以角色的 damageMul / defenseMul / knockMul / weightMul / grabMul 都生效。
+ */
+
+function resolveHit(attacker, defender) {
+  const m = activeMove(attacker);
+  if (!m) return null;
+  if (movePhase(attacker) !== 'active' || attacker.hasHit) return null;
+  const hb = moveBox(attacker);
+  const bb = bodyBox(defender);
+  if (!overlaps(hb, bb)) return null;
+
+  attacker.hasHit = true;
+
+  // 无敌帧（后跃闪避）
+  if (defender.invuln > 0) {
+    return { type: 'whiff', move: attacker.action, reason: 'invuln' };
+  }
+
+  // 防御 / 招架：抓投无视防御
+  const blocked = defender.blockHold && !m.ignoresBlock;
+  const parried = defender.action === 'parry' && defender.parryT > 0 && !m.ignoresBlock;
+
+  if (parried) {
+    // 招架成功：攻击方进入长硬直，自己一点伤害都不吃
+    attacker.hitStun = CFG.parryStun;
+    attacker.action = 'hit';
+    attacker.actionT = 0;
+    attacker.vx = -attacker.facing * 120;
+    defender.rage = Math.min(CFG.rageMax, defender.rage + 12);
+    return { type: 'parry', move: m.name };
+  }
+
+  let dmg = computeDamage(m, attacker, defender);
+  if (blocked) dmg = Math.max(1, dmg * CFG.blockReduce);
+  dmg = Math.round(dmg * 10) / 10;
+
+  // 血量按 100 为基准，但角色血量上限不同，所以用比例扣血
+  const hpLoss = dmg * (CFG.maxHp / (defender.hpMax || CFG.maxHp));
+  defender.hp = Math.max(0, defender.hp - hpLoss);
+  defender.hurtFlash = 0.16;
+
+  const knock = computeKnock(m, attacker, defender);
+
+  if (!blocked) {
+    // 平底锅生效期间，命中给对手更长硬直（更容易接上后续攻击）
+    defender.hitStun = m.hitStun + (panActive(attacker) ? PAN.hitStunBonus : 0);
+    defender.action = 'hit';
+    defender.actionT = 0;
+    defender.vx = attacker.facing * knock;
+    if (m.throw) defender.vy = -260 * (m.needsRage ? 1.4 : 1);      // 被抓投会小抛一下
+    // 连击计数
+    attacker.combo++;
+    attacker.comboT = 1.1;
+  } else {
+    defender.vx = attacker.facing * knock * 0.35;
+  }
+
+  // 怒气（平底锅生效期间攻击方攒得更快）
+  defender.rage = Math.min(CFG.rageMax, defender.rage + CFG.rageOnTake);
+  if (!blocked) {
+    const gain = (m.rageGain || 4) + (panActive(attacker) ? PAN.rageBonus : 0);
+    attacker.rage = Math.min(CFG.rageMax, attacker.rage + gain);
+  }
+
+  return {
+    type: blocked ? 'block' : 'hit',
+    move: m.name,
+    damage: dmg,
+    knock: blocked ? knock * 0.35 : knock,
+    x: (hb.x + hb.w / 2 + bb.x + bb.w / 2) / 2,
+    y: (hb.y + hb.h / 2 + bb.y + bb.h / 2) / 2,
+    combo: attacker.combo
+  };
+}
+
+/* ===== 平底锅（红太狼专属特殊技能）=====
+ * 规则：只有 attacker 是红太狼、且 defender 是灰太狼时才可用。
+ * 按下后进入 5 秒生效期：所有攻击附带额外伤害、额外怒气，命中给对手更长硬直。
+ * 然后是 9 秒冷却。冷却期间按了没用。
+ *
+ * 注意：这里按角色 id 判断，而不是 import 角色表——
+ * game.mjs 是纯逻辑模块，不该依赖 fighters.mjs（架构测试会拦住）。
+ */
+const PAN = {
+  ownerId: 'hongtailang',     // 谁持有这个技能
+  targetId: 'huitailang',     // 只对谁生效
+  name: '平底锅',
+  cooldown: 9,                // 冷却（秒）
+  duration: 5,                // 生效时长（秒）
+  damageBonus: 0.55,          // 生效期间额外伤害倍率
+  rageBonus: 4,               // 生效期间每次命中额外怒气
+  hitStunBonus: 0.12          // 生效期间命中给对手更长硬直
+};
+
+function panAvailable(attacker, defender) {
+  return !!attacker && !!defender
+    && attacker.def && attacker.def.id === PAN.ownerId
+    && defender.def && defender.def.id === PAN.targetId;
+}
+
+function tryUsePan(attacker, defender) {
+  if (!panAvailable(attacker, defender)) return false;
+  if (attacker.panCd > 0 || attacker.panReady > 0) return false;
+  if (attacker.hitStun > 0 || attacker.action === 'hit' || attacker.action === 'down') return false;
+  attacker.panReady = PAN.duration;
+  attacker.panCd = PAN.cooldown + PAN.duration;   // 生效结束后才开始算冷却
+  return true;
+}
+
+/* 平底锅是否正在生效 */
+function panActive(f) {
+  return !!f && f.panReady > 0;
+}
+
+/* 给界面用：一句话描述当前状态 */
+function panStatus(f, defender) {
+  if (!panAvailable(f, defender)) return { ok: false, text: '对手不是灰太狼', usable: false };
+  if (panActive(f)) return { ok: true, text: '生效中', usable: false, active: true, remain: f.panReady };
+  if (f.panCd > 0) return { ok: true, text: '冷却中', usable: false, cd: f.panCd };
+  return { ok: true, text: '就绪', usable: true };
+}
+
+/* ===== 每帧推进 ===== */
+
+function update(s, inputs, dt) {
+  dt = Math.min(dt, 0.05);
+  if (s.hitStop > 0) {                    // 命中停顿：全场冻结，只消耗停顿时间
+    s.hitStop = Math.max(0, s.hitStop - dt);
+    stepVisuals(s, dt);
+    return s;
+  }
+  s.shake = Math.max(0, s.shake - dt * 3);
+  stepVisuals(s, dt);
+
+  if (s.phase === 'intro') {
+    s.phaseT -= dt;
+    if (s.phaseT <= 0) { s.phase = 'fight'; s.events.push({ type: 'fight' }); }
+    return s;
+  }
+  if (s.phase === 'roundEnd') {
+    s.phaseT -= dt;
+    updateWinnerPose(s, dt);
+    if (s.phaseT <= 0) nextRound(s);
+    return s;
+  }
+  if (s.phase === 'matchEnd') { updateWinnerPose(s, dt); return s; }
+
+  // 计时
+  s.timer -= dt;
+  if (s.timer <= 0) {
+    s.timer = 0;
+    // 时间到：血多者胜，一样多算平局（双方都不加分，直接下一局）
+    if (s.p1.hp === s.p2.hp) endRound(s, null, 'time');
+    else endRound(s, s.p1.hp > s.p2.hp ? s.p1 : s.p2, 'time');
+    return s;
+  }
+
+  for (const f of [s.p1, s.p2]) {
+    updateFighter(s, f, inputs[f.side] || {}, dt);
+  }
+  // 双向命中判定（同一帧内两边都可能打中，先算先手）
+  const a = resolveHit(s.p1, s.p2);
+  if (a) applyHit(s, s.p1, s.p2, a);
+  const b = resolveHit(s.p2, s.p1);
+  if (b) applyHit(s, s.p2, s.p1, b);
+
+  checkRoundEnd(s);
+  return s;
+}
+
+function applyHit(s, attacker, defender, res) {
+  s.events.push(res);
+  if (res.type === 'hit' || res.type === 'block' || res.type === 'parry') {
+    s.hitStop = CFG.hitStop * (res.type === 'hit' ? 1 : 0.5);
+    s.shake = Math.min(1.2, s.shake + (res.type === 'hit' ? 0.5 : 0.25));
+    s.floats.push({
+      x: res.x, y: res.y, life: 1,
+      text: res.type === 'parry' ? '招架!' : (res.type === 'block' ? '防御' : String(Math.round(res.damage))),
+      color: res.type === 'parry' ? '#7ef0c8' : (res.type === 'block' ? '#9fb3d0' : '#ffce40')
+    });
+    for (let i = 0; i < (res.type === 'hit' ? 10 : 5); i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * 180;
+      s.particles.push({
+        x: res.x, y: res.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 80,
+        life: 0.5, color: res.type === 'parry' ? '#7ef0c8' : '#ffd27a', size: 2 + Math.random() * 3
+      });
+    }
+  }
+}
+
+function updateFighter(s, f, input, dt) {
+  f.actionT += dt;
+  f.hurtFlash = Math.max(0, f.hurtFlash - dt);
+  f.invuln = Math.max(0, f.invuln - dt);
+  f.rage = Math.max(0, Math.min(CFG.rageMax, f.rage));   // 怒气必须钳在范围内
+  if (f.landingLag > 0) f.landingLag = Math.max(0, f.landingLag - dt);
+  // 平底锅：先扣生效时间，再走冷却
+  if (f.panReady > 0) f.panReady = Math.max(0, f.panReady - dt);
+  if (f.panCd > 0) f.panCd = Math.max(0, f.panCd - dt);
+  f.comboT = Math.max(0, f.comboT - dt);
+  if (f.comboT <= 0) f.combo = 0;
+  if (f.parryT > 0) f.parryT = Math.max(0, f.parryT - dt);
+
+  // 硬直
+  if (f.hitStun > 0) {
+    f.hitStun = Math.max(0, f.hitStun - dt);
+    if (f.hitStun === 0 && f.action === 'hit') f.action = f.onGround ? 'idle' : 'jump';
+  }
+
+  // 朝向：面对对手（前冲/后跃过程中锁定朝向，否则会被自己冲过头带偏）
+  if (f.onGround && f.action !== 'dodge' && f.action !== 'dash') {
+    f.facing = f.other.x >= f.x ? 1 : -1;
+  }
+
+  // 动作推进
+  const m = activeMove(f);
+  if (m) {
+    const total = m.startup + m.active + m.recovery;
+    if (f.actionT >= total) f.action = f.onGround ? 'idle' : 'jump';
+  }
+
+  const acting = !canAct(f);
+
+  // 防御：按住且在地面且没有出招
+  const wantBlock = !!input.block && f.onGround && !acting;
+  f.blockHold = wantBlock;
+  f.parryT = wantBlock && input.blockPressed ? CFG.parryWindow : f.parryT;
+  if (wantBlock) { f.action = 'block'; f.vx *= 0.6; }
+
+  if (!acting) {
+    // 水平移动
+    const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    if (!wantBlock && dir !== 0) {
+      const sp = (input.run ? CFG.runSpeed : CFG.walkSpeed) * (f.speedMul || 1) * (f.onGround ? 1 : CFG.airControl);
+      f.vx = dir * sp;
+      if (f.onGround) f.action = 'walk';
+    } else if (f.onGround && f.action === 'walk') {
+      f.action = 'idle';
+    } else if (!f.onGround) {
+      f.action = f.action === 'idle' ? 'jump' : f.action;
+    }
+
+    // 动作输入：优先级 必杀 > 抓投 > 重击 > 腿踢 > 轻击
+    if (input.special && f.rage >= CFG.rageMax) tryMove(f, 'special');
+    else if (input.grab) tryMove(f, 'grab');
+    else if (input.heavy) tryMove(f, 'heavy');
+    else if (input.kick) tryMove(f, 'kick');
+    else if (input.light) tryMove(f, 'light');
+
+    if (input.jump) {
+      if (f.onGround) tryJump(f);
+      else if (input.airKick) tryMove(f, 'airKick');
+    }
+    if (input.dodge) {
+      // 按住方向（或 AI 明确指定）就是前冲，否则后跃
+      tryDodge(f, input.dodgeForward || dir !== 0 ? 1 : 0);
+    }
+    // 空中飞踢也可以用腿踢键触发
+    if (!f.onGround && input.kick) tryMove(f, 'airKick');
+    // 平底锅：只有红太狼对灰太狼时才有意义，其它情况按了也无效
+    if (input.pan && f.other) tryUsePan(f, f.other);
+  }
+
+  // 物理
+  f.x += f.vx * dt;
+  if (!f.onGround) {
+    f.vy += WORLD.gravity * dt;
+    f.y += f.vy * dt;
+    // 只有在站台上方才能落地；站台之外是深坑，会一直掉下去
+    if (f.y >= WORLD.groundY && hasFloor(f.x) && f.vy >= 0) {
+      f.y = WORLD.groundY;
+      f.vy = 0;
+      f.onGround = true;
+      if (f.action === 'jump' || f.action === 'airKick') f.action = 'idle';
+      // 落地硬直（飞踢落地稍长）
+      f.landingLag = f.action === 'airKick' ? 0.12 : 0.04;
+    }
+  } else {
+    // 站在台下沿之后会失去支撑（走出去就掉）
+    if (!hasFloor(f.x) && f.y >= WORLD.groundY - 1) {
+      f.onGround = false;
+    }
+    // 地面摩擦
+    if (!input.left && !input.right) {
+      const dec = CFG.friction * dt;
+      if (Math.abs(f.vx) <= dec) f.vx = 0;
+      else f.vx -= Math.sign(f.vx) * dec;
+    } else if (f.action !== 'idle' && f.action !== 'walk' && f.action !== 'block') {
+      const dec = CFG.friction * 0.7 * dt;
+      if (Math.abs(f.vx) <= dec) f.vx = 0;
+      else f.vx -= Math.sign(f.vx) * dec;
+    }
+  }
+
+  // 场地边界（撞墙，但不会被推出界）
+  const half = CFG.bodyRadius;
+  if (f.x < WORLD.wallLeft + half) { f.x = WORLD.wallLeft + half; f.vx = 0; }
+  if (f.x > WORLD.wallRight - half) { f.x = WORLD.wallRight - half; f.vx = 0; }
+
+  // 落台：掉到站台以下的深坑即判负
+  if (f.y > WORLD.pitY) {
+    s.events.push({ type: 'ringout', side: f.side });
+    endRound(s, f.other, 'ringout');
+  }
+}
+
+function updateWinnerPose(s, dt) {
+  for (const f of [s.p1, s.p2]) {
+    f.vx *= 0.9;
+    f.x += f.vx * dt;
+    if (!f.onGround) {
+      f.vy += WORLD.gravity * dt;
+      f.y = Math.min(WORLD.groundY, f.y + f.vy * dt);
+      if (f.y >= WORLD.groundY) { f.y = WORLD.groundY; f.onGround = true; f.vy = 0; }
+    }
+  }
+}
+
+function stepVisuals(s, dt) {
+  for (let i = s.floats.length - 1; i >= 0; i--) {
+    const f = s.floats[i];
+    f.y -= dt * 44; f.life -= dt * 1.2;
+    if (f.life <= 0) s.floats.splice(i, 1);
+  }
+  for (let i = s.particles.length - 1; i >= 0; i--) {
+    const p = s.particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 900 * dt;
+    p.vx *= 0.94;
+    p.life -= dt * 2;
+    if (p.life <= 0) s.particles.splice(i, 1);
+  }
+}
+
+/* ===== 回合流程 ===== */
+
+function checkRoundEnd(s) {
+  if (s.phase !== 'fight') return;
+  if (s.p1.hp <= 0 && s.p2.hp <= 0) return endRound(s, null, 'double');
+  if (s.p1.hp <= 0) return endRound(s, s.p2, 'ko');
+  if (s.p2.hp <= 0) return endRound(s, s.p1, 'ko');
+  return null;
+}
+
+function endRound(s, winner, reason) {
+  if (s.phase !== 'fight') return;
+  s.phase = 'roundEnd';
+  s.phaseT = 1.9;
+  s.roundWinner = winner ? winner.side : null;
+  if (winner) {
+    winner.wins++;
+    winner.action = 'win';
+    winner.actionT = 0;
+    s.events.push({ type: 'roundWin', side: winner.side, reason, wins: winner.wins });
+  } else {
+    s.events.push({ type: 'roundDraw', reason });
+  }
+  if (winner && winner.wins >= CFG.roundsToWin) {
+    s.phase = 'matchEnd';
+    s.phaseT = 99;
+    s.winner = winner.side;
+    s.events.push({ type: 'matchWin', side: winner.side });
+  }
+}
+
+function nextRound(s) {
+  s.round++;
+  s.timer = CFG.roundTime;
+  s.phase = 'intro';
+  s.phaseT = 1.0;
+  s.hitStop = 0; s.shake = 0;
+  s.floats.length = 0; s.particles.length = 0;
+  const mid = WORLD.w / 2;
+  // 关键：这里必须“造一个全新的 fighter 对象”，不能用 Object.assign 覆盖旧对象。
+  // Object.assign 不会删除旧对象上多出来的属性，上一局的技能冷却/生效状态
+  // （panCd / panReady 这些后加的字段）会被带进新一局。这个坑我踩过一次。
+  const carry = {};
+  for (const f of [s.p1, s.p2]) carry[f.side] = { wins: f.wins, def: f.def };
+  const mk = side => createFighter(
+    carry[side].def, side,
+    side === 'p1' ? mid - CFG.startGap / 2 : mid + CFG.startGap / 2
+  );
+  s.p1 = mk('p1');
+  s.p2 = mk('p2');
+  s.p1.wins = carry.p1.wins;
+  s.p2.wins = carry.p2.wins;
+  s.p1.other = s.p2;
+  s.p2.other = s.p1;
+  s.roundWinner = null;
+  return s;
+}
+
+function matchOver(s) {
+  return s.phase === 'matchEnd';
+}
+
+/* ===== 简易 AI（给“练习模式”用）===== */
+
+function aiInput(s, f, level = 1) {
+  const o = f.other;
+  const dx = o.x - f.x;
+  const dist = Math.abs(dx);
+  const toward = dx > 0 ? 1 : -1;
+  const inp = { left: false, right: false, jump: false, light: false, heavy: false, kick: false, grab: false, block: false, dodge: false, run: false, special: false };
+
+  if (s.phase !== 'fight' || f.hitStun > 0) return inp;
+
+  // 对手正在出招 → 有概率防御或招架
+  const om = activeMove(o);
+  const oAttacking = om && movePhase(o) === 'startup';
+  if (oAttacking && dist < 110) {
+    const r = Math.random();
+    if (r < 0.30 + level * 0.12) { inp.block = true; inp.blockPressed = true; return inp; }
+    if (r < 0.42 + level * 0.1) { inp.dodge = true; return inp; }
+    // 中距离有概率前冲穿过对手的攻击，顺势贴脸
+    if (r < 0.52 + level * 0.08 && dist > 60 && dist < 170) {
+      inp.dodge = true;
+      inp.dodgeForward = true;
+      return inp;
+    }
+  }
+
+  // 抓投来了就跳开或抢轻击
+  if (om && om.name === '抓投' && movePhase(o) === 'startup' && dist < 90) {
+    if (Math.random() < 0.5) inp.jump = true; else inp.light = true;
+    return inp;
+  }
+
+  // 怒气满了就接近放必杀
+  if (f.rage >= CFG.rageMax && dist < 90 && Math.random() < 0.5) { inp.special = true; return inp; }
+
+  if (dist > 90) {
+    if (toward > 0) inp.right = true; else inp.left = true;
+    inp.run = dist > 220;
+    if (dist > 260 && Math.random() < 0.02 * level) inp.jump = true;
+    return inp;
+  }
+
+  // 近距离：随机攻击组合
+  const r = Math.random();
+  const rate = 0.06 + level * 0.05;
+  if (r < rate) inp.light = true;
+  else if (r < rate * 1.6) inp.heavy = true;
+  else if (r < rate * 2.2) inp.kick = true;
+  else if (r < rate * 2.7) inp.grab = true;
+  else if (r < rate * 3.0) inp.block = true;
+  else if (r < rate * 3.3) inp.dodge = true;
+  else if (dist > 70) { if (toward > 0) inp.right = true; else inp.left = true; }
+  return inp;
+}
+
+/* ===== 结算信息 ===== */
+
+function matchSummary(s) {
+  return {
+    winner: s.winner,
+    round: s.round,
+    p1: { name: s.p1.def.name, wins: s.p1.wins, hp: Math.round(s.p1.hp) },
+    p2: { name: s.p2.def.name, wins: s.p2.wins, hp: Math.round(s.p2.hp) }
+  };
+}
+
+function drainEvents(s) {
+  const out = s.events.slice();
+  s.events.length = 0;
+  return out;
+}
+
+/* ==================== 渲染与输入（main.mjs） ==================== */
+/* 渲染层 + 输入层 + 主循环
+ * 玩法全在 game.mjs，这里只负责画、收键盘、切面板。
+ */
+
+
+
+/* ===== 画布 ===== */
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d');
+let DPR = 1, VW = 0, VH = 0, viewScale = 1, viewOx = 0, viewOy = 0;
+
+/* 角色绘制缩放：本地坐标里角色约 1.6 高，乘这个数就是像素身高。
+ * 46 → 约 74px（偏小），现在 64 → 约 103px，看起来更像在"对打"而不是"两个小点"。 */
+const FIGHTER_SCALE = 64;
+
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  VW = canvas.clientWidth || innerWidth;
+  VH = canvas.clientHeight || innerHeight;
+  canvas.width = Math.round(VW * DPR);
+  canvas.height = Math.round(VH * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  // 取景框：人物放大后要稍微多留出上方空间，否则跳起来会顶到画面外
+  viewScale = Math.min(VW / 900, VH / 560);
+  viewOx = (VW - 900 * viewScale) / 2;
+  viewOy = (VH - 560 * viewScale) / 2 + 30;
+}
+
+/* ===== 状态 ===== */
+let state = null;
+let mode = 'pvp';                 // pvp | ai
+let pick = { p1: 'xiyangyang', p2: 'feiyangyang' };
+let keymap = { p1: KEYS.p1, p2: KEYS.p2 };
+let useAlt = false;
+let paused = false;
+let aiLevel = 1;
+let toastT = 0;
+let showBoxes = false;
+
+const $ = id => document.getElementById(id);
+const panel = $('panel'), sheet = $('sheet'), toast = $('toast');
+
+/* ===== 输入 ===== */
+const down = Object.create(null);
+const pressed = Object.create(null);     // 边沿触发，消费后清空
+
+addEventListener('keydown', e => {
+  if (!down[e.code]) pressed[e.code] = true;
+  down[e.code] = true;
+  if (e.code === 'Escape') { togglePause(); return; }
+  if (e.code === 'KeyR' && state && matchOver(state)) { startMatch(); return; }
+  if (e.code === 'Tab') { e.preventDefault(); useAlt = !useAlt; keymap.p2 = useAlt ? KEYS_ALT.p2 : KEYS.p2; showToast(useAlt ? '玩家 2 已切到备用键位' : '玩家 2 已切回小键盘', '#7ef0c8', 1.4); return; }
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { down[e.code] = false; });
+addEventListener('blur', () => { for (const k in down) down[k] = false; });
+
+function readInput(side) {
+  const k = keymap[side];
+  const inp = {
+    left: !!down[k.left], right: !!down[k.right], jump: false,
+    run: !!down[k.run], block: !!down[k.block], dodge: false,
+    light: false, heavy: false, kick: false, grab: false, special: false, pan: false
+  };
+  // 跳跃 / 攻击 / 闪避 / 技能用边沿触发，避免按住就连续出招
+  if (pressed[k.jump]) inp.jump = true;
+  if (pressed[k.light]) inp.light = true;
+  if (pressed[k.heavy]) inp.heavy = true;
+  if (pressed[k.kick]) inp.kick = true;
+  if (pressed[k.grab]) inp.grab = true;
+  if (pressed[k.special]) inp.special = true;
+  if (pressed[k.dodge]) inp.dodge = true;
+  if (k.pan && pressed[k.pan]) inp.pan = true;
+  if (pressed[k.block]) inp.blockPressed = true;      // 招架要看“刚按下”这一帧
+  return inp;
+}
+
+function clearPressed() { for (const k in pressed) delete pressed[k]; }
+
+/* ===== 特效提示 ===== */
+function showToast(text, color = '#ffce40', secs = 1.3) {
+  toast.textContent = text;
+  toast.style.color = color;
+  toast.classList.add('show');
+  toastT = secs;
+}
+
+/* ===== 开局 ===== */
+function startMatch() {
+  const p1 = getChar(pick.p1), p2 = getChar(pick.p2);
+  state = createMatch(p1, p2);
+  applyCharStats(state.p1, p1);
+  applyCharStats(state.p2, p2);
+  // 血量按比例换算到角色血量上限
+  state.p1.hp = state.p1.hpMax;
+  state.p2.hp = state.p2.hpMax;
+  paused = false;
+  panel.classList.add('hide');
+  buildHud();
+  showToast('第 1 局 · 开始', '#7ef0c8', 1.0);
+}
+
+function applyCharStats(f, def) {
+  const st = def.stats;
+  applyFighterStats(f, {
+    hpMax: Math.round(CFG.maxHp * st.hp),
+    speedMul: st.speed, damageMul: st.damage, defenseMul: st.defense,
+    knockMul: st.knock, grabMul: st.grabPower, weightMul: st.weight
+  });
+}
+
+/* ===== HUD ===== */
+const hudEl = {
+  p1name: $('p1name'), p2name: $('p2name'),
+  p1hp: $('p1hp'), p2hp: $('p2hp'),
+  p1ghost: $('p1ghost'), p2ghost: $('p2ghost'),
+  p1rage: $('p1rage'), p2rage: $('p2rage'),
+  p1rageWrap: $('p1rageWrap'), p2rageWrap: $('p2rageWrap'),
+  p1wins: $('p1wins'), p2wins: $('p2wins'),
+  p1skill: $('p1skill'), p2skill: $('p2skill'),
+  p1skillWrap: $('p1skillWrap'), p2skillWrap: $('p2skillWrap'),
+  p1skillTxt: $('p1skillTxt'), p2skillTxt: $('p2skillTxt'),
+  timer: $('timer'), roundTag: $('roundTag'),
+  p1tag: $('p1tag'), p2tag: $('p2tag')
+};
+
+function buildHud() {
+  hudEl.p1name.textContent = state.p1.def.name + '（' + STYLE_LABEL[state.p1.def.style] + '）';
+  hudEl.p2name.textContent = (mode === 'ai' ? '电脑 · ' : '') + state.p2.def.name + '（' + STYLE_LABEL[state.p2.def.style] + '）';
+  for (const [side, el] of [['p1', hudEl.p1wins], ['p2', hudEl.p2wins]]) {
+    el.innerHTML = '';
+    for (let i = 0; i < CFG.roundsToWin; i++) {
+      const d = document.createElement('span');
+      d.className = 'pip' + (state[side].wins > i ? ' on' : '');
+      el.appendChild(d);
+    }
+  }
+  hudEl.p1tag.textContent = 'A/D 移动 · W 跳 · J 轻 · K 重 · L 踢 · I 抓 · U 防御 · Y 后跃 · H 必杀 · O 平底锅';
+  hudEl.p2tag.textContent = useAlt
+    ? '←/→ 移动 · ↑ 跳 · , 轻 · . 重 · / 踢 · ; 抓 · M 防御 · \' 后跃 · ] 必杀 · \\ 平底锅'
+    : '←/→ 移动 · ↑ 跳 · 小键盘 1 轻 · 2 重 · 3 踢 · 5 抓 · 4 防御 · 7 后跃 · 6 必杀 · 8 平底锅';
+}
+
+function updateHud() {
+  const s = state;
+  for (const [side, f] of [['p1', s.p1], ['p2', s.p2]]) {
+    const pct = Math.max(0, f.hp / f.hpMax * 100);
+    hudEl[side + 'hp'].style.width = pct + '%';
+    // 残影慢慢跟上
+    const ghost = parseFloat(hudEl[side + 'ghost'].style.width || '100');
+    if (pct < ghost) hudEl[side + 'ghost'].style.width = pct + '%';
+    else if (pct > ghost) hudEl[side + 'ghost'].style.width = pct + '%';
+    const ragePct = f.rage / CFG.rageMax * 100;
+    hudEl[side + 'rage'].style.width = ragePct + '%';
+    hudEl[side + 'rageWrap'].classList.toggle('full', f.rage >= CFG.rageMax);
+
+    // 平底锅技能条
+    const st = panStatus(f, f.other);
+    const wrap = hudEl[side + 'skillWrap'];
+    const txt = hudEl[side + 'skillTxt'];
+    wrap.classList.toggle('off', !st.ok);
+    wrap.classList.toggle('ready', !!st.usable);
+    wrap.classList.toggle('active', !!st.active);
+    if (!st.ok) {
+      hudEl[side + 'skill'].style.width = '0%';
+      txt.textContent = '平底锅（对手得是灰太狼）';
+    } else if (st.active) {
+      hudEl[side + 'skill'].style.width = (st.remain / PAN.duration * 100) + '%';
+      txt.textContent = '平底锅生效中 ' + st.remain.toFixed(1) + 's';
+    } else if (st.cd > 0) {
+      // 冷却：从 0 回填到满
+      const total = PAN.cooldown + PAN.duration;
+      hudEl[side + 'skill'].style.width = Math.max(0, (1 - st.cd / total)) * 100 + '%';
+      txt.textContent = '平底锅冷却 ' + st.cd.toFixed(1) + 's';
+    } else {
+      hudEl[side + 'skill'].style.width = '100%';
+      txt.textContent = '平底锅就绪（按技能键）';
+    }
+  }
+  hudEl.timer.textContent = Math.ceil(s.timer);
+  hudEl.roundTag.textContent = '第 ' + s.round + ' 局';
+}
+
+/* ===== 场地绘制 ===== */
+const THEME = {
+  sky: ['#132238', '#0d1726'],
+  ground: '#2b3a2e', groundDark: '#22301f', dirt: '#3a3126',
+  platform: '#4a4032', platformTop: '#6b5c45',
+  crowd: ['#3b4a63', '#4b3b53', '#3b5348'],
+  moon: 'rgba(255,240,200,.14)'
+};
+
+function drawArena(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, 520);
+  g.addColorStop(0, THEME.sky[0]);
+  g.addColorStop(1, THEME.sky[1]);
+
+  ctx.save();
+  ctx.translate(viewOx, viewOy);
+  ctx.scale(viewScale, viewScale);
+  ctx.beginPath();
+  ctx.rect(-viewOx / viewScale, -viewOy / viewScale, VW / viewScale, VH / viewScale);
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  // 月亮
+  ctx.beginPath();
+  ctx.arc(720, 110, 58, 0, Math.PI * 2);
+  ctx.fillStyle = THEME.moon;
+  ctx.fill();
+
+  // 远景山
+  ctx.fillStyle = 'rgba(255,255,255,.05)';
+  ctx.beginPath();
+  ctx.moveTo(-100, 300);
+  ctx.lineTo(140, 190);
+  ctx.lineTo(340, 300);
+  ctx.lineTo(520, 175);
+  ctx.lineTo(760, 300);
+  ctx.lineTo(1000, 200);
+  ctx.lineTo(1000, 420);
+  ctx.lineTo(-100, 420);
+  ctx.closePath();
+  ctx.fill();
+
+  // 观众席（一排小圆点，缓慢起伏）
+  for (let i = 0; i < 40; i++) {
+    const x = -40 + i * 25;
+    const y = 300 + (i % 3) * 12 + Math.sin(t * 1.6 + i) * 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = THEME.crowd[i % 3];
+    ctx.fill();
+  }
+
+  // 地面
+  ctx.fillStyle = THEME.ground;
+  ctx.fillRect(-100, WORLD.groundY, 1100, 220);
+  ctx.fillStyle = THEME.groundDark;
+  ctx.fillRect(-100, WORLD.groundY, 1100, 10);
+  // 地砖纹
+  ctx.strokeStyle = 'rgba(0,0,0,.18)';
+  ctx.lineWidth = 1;
+  for (let x = -100; x < 1000; x += 60) {
+    ctx.beginPath();
+    ctx.moveTo(x, WORLD.groundY + 10);
+    ctx.lineTo(x - 30, WORLD.groundY + 200);
+    ctx.stroke();
+  }
+  // 场边线
+  ctx.strokeStyle = 'rgba(255,255,255,.22)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(WORLD.wallLeft - 14, WORLD.groundY - 2);
+  ctx.lineTo(WORLD.wallLeft - 14, 200);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(WORLD.wallRight + 14, WORLD.groundY - 2);
+  ctx.lineTo(WORLD.wallRight + 14, 200);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/* 判定框调试（按 F1 开关，方便核对判定位置） */
+addEventListener('keydown', e => { if (e.code === 'F1') { e.preventDefault(); showBoxes = !showBoxes; } });
+
+function drawBox(b, color) {
+  if (!b) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(b.x, b.y, b.w, b.h);
+}
+
+function drawFighters(t) {
+  ctx.save();
+  ctx.translate(viewOx, viewOy);
+  ctx.scale(viewScale, viewScale);
+
+  const list = [state.p1, state.p2].sort((a, b) => a.y - b.y);
+
+  for (const f of list) {
+    const pose = pickPose(f);
+    const flash = f.hurtFlash > 0 ? 0.5 : 0;
+    drawShadow(ctx, f.x, WORLD.groundY, f.y, 1.4);
+    // 人物放大：这个数是以脚底为原点的整体缩放（本地坐标里角色约 1.6 高）
+    const opts = { facing: f.facing, scale: FIGHTER_SCALE, time: t, flash, panActive: panActive(f) };
+
+    // 招式拖影：让打击更有速度感
+    const m = activeMove(f);
+    if (m && movePhase(f) === 'active') {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      drawFighter(ctx, f.def, f.x - f.facing * 16, f.y, pose, { ...opts, flash: 0 });
+      ctx.restore();
+    }
+    drawFighter(ctx, f.def, f.x, f.y, pose, opts);
+
+    // 必杀满槽提示（范围跟着人物一起放大）
+    if (f.rage >= CFG.rageMax) {
+      ctx.save();
+      ctx.globalAlpha = 0.5 + Math.sin(t * 8) * 0.3;
+      ctx.strokeStyle = '#ffce40';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.ellipse(f.x, f.y - 60, 44, 70, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 平底锅生效提示：橙色光环 + 文字
+    if (panActive(f)) {
+      ctx.save();
+      ctx.globalAlpha = 0.35 + Math.sin(t * 10) * 0.2;
+      ctx.strokeStyle = '#ff9d3c';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(f.x, f.y - 44, 52, 40, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (showBoxes) {
+      drawBox(bodyBox(f), 'rgba(120,220,255,.8)');
+      if (m && movePhase(f) === 'active') drawBox(moveBox(f), 'rgba(255,90,90,.95)');
+    }
+  }
+
+  // 飘字与粒子
+  for (const fl of state.floats) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, fl.life));
+    ctx.font = 'bold 22px "Segoe UI","PingFang SC",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = fl.color;
+    ctx.fillText(fl.text, fl.x, fl.y);
+  }
+  ctx.globalAlpha = 1;
+  for (const p of state.particles) {
+    ctx.globalAlpha = Math.max(0, p.life * 2);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+
+/* ===== 事件处理 ===== */
+function handleEvents() {
+  for (const ev of drainEvents(state)) {
+    switch (ev.type) {
+      case 'hit': showToast('命中 ×' + (ev.combo || 1), '#ffce40', 0.5); break;
+      case 'parry': showToast('招架成功！', '#7ef0c8', 0.9); break;
+      case 'block': break;
+      case 'roundWin': {
+        const f = ev.side === 'p1' ? state.p1 : state.p2;
+        const why = ev.reason === 'ringout' ? '落台' : (ev.reason === 'time' ? '时间到' : 'K.O.');
+        showToast(f.def.name + ' 拿下第 ' + state.round + ' 局（' + why + '）', '#ffce40', 1.6);
+        buildHud();
+        break;
+      }
+      case 'roundDraw': showToast('本局平局', '#9fb3d0', 1.4); break;
+      case 'matchWin': {
+        const f = ev.side === 'p1' ? state.p1 : state.p2;
+        showResult(f);
+        break;
+      }
+      default: break;
+    }
+  }
+}
+
+/* ===== 面板 ===== */
+
+function modeLabel(m) {
+  return m === 'ai' ? '单人练习（打电脑）' : '双人对打';
+}
+
+function showMenu() {
+  sheet.innerHTML = `
+    <h1>羊村对决</h1>
+    <div class="sub">YANGCUN ARENA · 1 v 1</div>
+    <p>两个人共用一副键盘对打。<b>三局两胜</b>，把对手打到没血、或者把他打出场地都算赢一局。</p>
+    <div class="modes">
+      <div class="mode${mode === 'pvp' ? ' sel' : ''}" data-m="pvp">双人对打</div>
+      <div class="mode${mode === 'ai' ? ' sel' : ''}" data-m="ai">单人练习（打电脑）</div>
+    </div>
+    <div class="pickwrap">
+      <div class="pcol p1c">
+        <div class="head">玩家 1 选角</div>
+        <div class="roster" id="r1"></div>
+        <div class="detail" id="d1"></div>
+        <div class="keysBox" id="k1"></div>
+      </div>
+      <div class="vs">VS</div>
+      <div class="pcol p2c">
+        <div class="head" id="h2">玩家 2 选角</div>
+        <div class="roster" id="r2"></div>
+        <div class="detail" id="d2"></div>
+        <div class="keysBox" id="k2"></div>
+      </div>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="startBtn">开始对打</button>
+    </div>
+    <div class="hint">
+      按 <kbd>Tab</kbd> 可切换玩家 2 的键位（小键盘 ↔ 右侧字母键，笔记本没小键盘时用）<br>
+      对打中按 <kbd>Esc</kbd> 暂停 · <kbd>F1</kbd> 显示判定框（调试用）
+    </div>`;
+  renderRosters();
+  panel.classList.remove('hide');
+}
+
+function renderRosters() {
+  for (const side of ['p1', 'p2']) {
+    const box = $('r' + side[1]);
+    box.innerHTML = ROSTER.map(c => `
+      <div class="face${pick[side] === c.id ? ' sel' : ''}" data-id="${c.id}" data-side="${side}">
+        <canvas width="58" height="58"></canvas>
+        <div class="fn">${c.name}</div>
+      </div>`).join('');
+    box.querySelectorAll('.face').forEach(el => {
+      el.addEventListener('click', () => {
+        pick[side] = el.dataset.id;
+        renderRosters();
+      });
+    });
+    box.querySelectorAll('canvas').forEach((cv, i) => {
+      const def = ROSTER[i];
+      const g = cv.getContext('2d');
+      g.clearRect(0, 0, cv.width, cv.height);
+      g.save();
+      g.translate(cv.width / 2, cv.height - 4);
+      drawFighter(g, def, 0, 0, 'idle', { scale: cv.height / 1.62, facing: side === 'p1' ? 1 : -1, time: 0 });
+      g.restore();
+    });
+    const d = getChar(pick[side]);
+    $('d' + side[1]).innerHTML =
+      `<b>${d.name}</b> · ${d.title}（${STYLE_LABEL[d.style]}）<br>${d.desc}`;
+    const k = side === 'p1' ? keymap.p1 : keymap.p2;
+    const L = c => '<kbd>' + (KEY_LABEL[c] || c) + '</kbd>';
+    $('k' + side[1]).innerHTML =
+      `移动 ${L(k.left)}${L(k.right)} · 跳 ${L(k.jump)} · 跑 ${L(k.run)}<br>` +
+      `轻击 ${L(k.light)} · 重击 ${L(k.heavy)} · 腿踢 ${L(k.kick)} · 抓投 ${L(k.grab)}<br>` +
+      `防御 ${L(k.block)} · 后跃 ${L(k.dodge)} · 必杀 ${L(k.special)} · 平底锅 ${L(k.pan)}`;
+    // 红太狼 + 对手是灰太狼 时，提示这个专属技能
+    const other = getChar(pick[side === 'p1' ? 'p2' : 'p1']);
+    if (d.id === PAN.ownerId) {
+      const canUse = other.id === PAN.targetId;
+      $('d' + side[1]).innerHTML += canUse
+        ? `<br><span style="color:#ffd24a">★ 专属技能「平底锅」可用：按 ${KEY_LABEL[k.pan]} 触发，` +
+          `${PAN.duration} 秒内所有攻击增伤 ${Math.round(PAN.damageBonus * 100)}%，冷却 ${PAN.cooldown} 秒</span>`
+        : `<br><span style="color:#8ba0bb">专属技能「平底锅」：需要对手是灰太狼</span>`;
+    }
+  }
+  $('h2').textContent = mode === 'ai' ? '电脑对手' : '玩家 2 选角';
+  sheet.querySelectorAll('.mode').forEach(el => {
+    el.classList.toggle('sel', el.dataset.m === mode);
+    el.onclick = () => { mode = el.dataset.m; showMenu(); };
+  });
+  $('startBtn').onclick = startMatch;
+}
+
+function showResult(winner) {
+  const s = matchSummary(state);
+  sheet.innerHTML = `
+    <h1>${winner.def.name} 获胜！</h1>
+    <div class="sub">${winner.side === 'p1' ? '玩家 1' : (mode === 'ai' ? '电脑' : '玩家 2')} 拿下比赛</div>
+    <p>比分 <b>${s.p1.wins} : ${s.p2.wins}</b><br>
+       ${s.p1.name} 剩余血量 ${s.p1.hp} · ${s.p2.name} 剩余血量 ${s.p2.hp}</p>
+    <div class="btnrow">
+      <button class="btn" id="againBtn">再打一场</button>
+      <button class="btn ghost" id="menuBtn">换角色 / 换模式</button>
+    </div>
+    <div class="hint">也可以直接按 <kbd>R</kbd> 再来一场</div>`;
+  $('againBtn').onclick = startMatch;
+  $('menuBtn').onclick = showMenu;
+  panel.classList.remove('hide');
+}
+
+function togglePause() {
+  if (!state || matchOver(state)) return;
+  paused = !paused;
+  if (paused) {
+    sheet.innerHTML = `
+      <h1>已暂停</h1>
+      <div class="sub">PAUSED</div>
+      <p>第 ${state.round} 局 · 比分 ${state.p1.wins} : ${state.p2.wins}</p>
+      <div class="btnrow">
+        <button class="btn" id="resumeBtn">继续</button>
+        <button class="btn ghost" id="restartBtn">重开这场</button>
+        <button class="btn ghost" id="menuBtn2">回到菜单</button>
+      </div>`;
+    $('resumeBtn').onclick = togglePause;
+    $('restartBtn').onclick = () => { startMatch(); };
+    $('menuBtn2').onclick = () => { state = null; paused = false; showMenu(); };
+    panel.classList.remove('hide');
+  } else {
+    panel.classList.add('hide');
+  }
+}
+$('pauseBtn').addEventListener('click', togglePause);
+
+/* ===== 主循环 ===== */
+let last = performance.now();
+let loopFatal = false;          // 出现过无法恢复的错误就不再往下画，避免刷屏
+let loopErrors = 0;
+
+// 运行中出错时，把真实原因显示到页面上（而不是让画面静止、用户干等）
+function reportRuntimeError(kind, e) {
+  loopErrors++;
+  const msg = (e && e.message) || String(e);
+  const stack = ((e && e.stack) || '').split('\n').slice(0, 4).join('\n');
+  console.error('[羊村对决] ' + kind, e);
+  if (loopErrors > 3) return;                  // 只报前几次，避免每帧刷屏
+  window.dispatchEvent(new CustomEvent('yangcun-fight-bootfail', {
+    detail: { message: kind + '：' + msg, stack }
+  }));
+  // 已经启动过的话，遮罩本来是隐藏的，这里重新显示出来让用户看到原因
+  const boot = document.getElementById('boot');
+  if (boot) boot.classList.remove('hide');
+  // 结束对局并退回面板，至少让界面是活的
+  loopFatal = true;
+}
+
+function loop(now) {
+  // 防止时间戳倒退导致 dt 为负（会让计时器反着走、特效倒放）
+  const dt = Math.max(0, Math.min((now - last) / 1000, .1));
+  last = now;
+  const t = now / 1000;
+
+  if (loopFatal) { return; }                   // 已报错，停止主循环
+
+  try {
+    frame(dt, t);
+  } catch (e) {
+    reportRuntimeError('运行出错', e);
+    return;
+  }
+  requestAnimationFrame(loop);
+}
+
+function frame(dt, t) {
+  ctx.clearRect(0, 0, VW, VH);
+
+  if (state && !paused) {
+    const inputs = { p1: readInput('p1'), p2: readInput('p2') };
+    if (mode === 'ai') inputs.p2 = aiInput(state, state.p2, aiLevel);
+    update(state, inputs, dt);
+    clearPressed();
+    handleEvents();
+  }
+
+  if (state) {
+    // 镜头震动
+    const shake = state.shake;
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - .5) * 14 * shake, (Math.random() - .5) * 10 * shake);
+    drawArena(t);
+    drawFighters(t);
+    // 命中停顿期间给个白闪提示
+    if (state.hitStop > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,.06)';
+      ctx.fillRect(0, 0, VW, VH);
+    }
+    ctx.restore();
+    updateHud();
+  } else {
+    ctx.fillStyle = '#08111a';
+    ctx.fillRect(0, 0, VW, VH);
+  }
+
+  if (toastT > 0) {
+    toastT -= dt;
+    if (toastT <= 0) toast.classList.remove('show');
+  }
+}
+
+/* ===== 启动 ===== */
+
+resize();
+addEventListener('resize', resize);
+showMenu();
+requestAnimationFrame(loop);
+
+window.dispatchEvent(new CustomEvent('yangcun-fight-ready'));
+window.__fight = () => ({
+  phase: state && state.phase,
+  round: state && state.round,
+  p1: state && { name: state.p1.def.name, hp: Math.round(state.p1.hp), hpMax: state.p1.hpMax, wins: state.p1.wins },
+  p2: state && { name: state.p2.def.name, hp: Math.round(state.p2.hp), hpMax: state.p2.hpMax, wins: state.p2.wins },
+  mode, pick, paused, hasState: !!state
+});
+// 供自检使用：跳过选角界面直接开一局
+window.__startFight = (m, a, b) => {
+  if (m) mode = m;
+  if (a) pick.p1 = a;
+  if (b) pick.p2 = b;
+  startMatch();
+  return !!state;
+};
+
+  } catch (err) {
+    var e = err || {};
+    var detail = (e.message || String(e));
+    var where = '';
+    try {
+      var st = (e.stack || '').split('\n')[1] || '';
+      where = st.trim();
+    } catch (ignore) {}
+    window.dispatchEvent(new CustomEvent('yangcun-fight-bootfail', {
+      detail: {
+        message: detail + (where ? '  @ ' + where : ''),
+        stack: (e.stack || '')
+      }
+    }));
+    // 再兜一层：如果连派发事件都失败，就直接改页面文字
+    try {
+      var bm = document.getElementById('bootMsg');
+      if (bm) { bm.className = 'err'; bm.textContent = '启动出错：' + detail; }
+    } catch (ignore2) {}
+  }
+})();
+</script>
+</body>
+</html>
