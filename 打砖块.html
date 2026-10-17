@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打砖块 Breakout —— 我的第一个游戏作品</title>
+<style>
+  /* ===== 页面基础样式 ===== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    background: #1b1d24;
+    background-image: radial-gradient(circle at 50% 0%, #2a2e3d 0%, #1b1d24 60%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #e8eaed;
+    padding: 24px 16px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: #ffd966;
+  }
+
+  /* canvas 用圆角和阴影包一下，看起来更像"作品"而不是"教学 demo" */
+  #game {
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    display: block;
+    cursor: none;              /* 游戏内自绘挡板，隐藏系统鼠标指针 */
+    max-width: 100%;
+  }
+
+  .tips {
+    font-size: 13px;
+    color: #8b93a7;
+    text-align: center;
+    line-height: 1.9;
+    max-width: 520px;
+  }
+
+  .tips b { color: #b9c2d6; font-weight: 600; }
+
+  kbd {
+    display: inline-block;
+    padding: 1px 7px;
+    border: 1px solid #3d4354;
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: #262a36;
+    font-size: 12px;
+    color: #cfd6e4;
+  }
+
+  .signature { font-size: 12px; color: #565e70; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<h1>打 砖 块</h1>
+<canvas id="game" width="700" height="600"></canvas>
+
+<div class="tips">
+  <b>鼠标左右移动</b>控制底部挡板 &nbsp;·&nbsp; <b>击碎全部砖块</b>即通关<br>
+  每打掉 8 块砖，球速会自动加快 &nbsp;·&nbsp; 没接住球会掉 1 条命（共 3 条）<br>
+  <kbd>空格</kbd> 开始 / 重玩 &nbsp; <kbd>R</kbd> 重新开始
+</div>
+<div class="signature">作者：&lt;你的名字&gt;　·　基于课堂 Pong 作业扩展</div>
+
+<script>
+/* ============================================================================
+   打砖块 Breakout —— 单文件网页版
+   ----------------------------------------------------------------------------
+   这份代码和 Processing 版逻辑完全一致，只是换成了网页的 canvas 绘图。
+   建议对照着看：先理解 Processing 版（更直观），再看这份就能理解网页版。
+
+   【三种游戏状态】（对应变量 state）
+     0 = 等待开始    1 = 游戏中    2 = 游戏结束    3 = 通关
+   ============================================================================ */
+
+// ---------- 1. 拿到画布和画笔 ----------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');   // ctx 就是我们的"画笔"
+const W = canvas.width;                // 画布宽 700
+const H = canvas.height;               // 画布高 600
+
+// ---------- 2. 游戏状态与配置 ----------
+let state = 0;                 // 当前游戏状态
+
+let score = 0;                 // 当前分数
+let lives = 3;                 // 剩余生命
+let highScore = 0;             // 最高分
+
+// 挡板（横着放在屏幕最下方底部，经典打砖块布局）
+const paddle = { w: 120, h: 20, x: 0, y: 0 };
+
+// 球
+const ball = { x: 0, y: 0, size: 20, vx: 0, vy: 0 };
+const BASE_SPEED = 1.5;        // 球的初始速度（再调慢，更适合新手）
+
+// 砖块配置
+const BRICK_ROWS = 6;          // 6 行
+const BRICK_COLS = 8;          // 8 列
+const BRICK_H = 28;            // 砖块高
+const BRICK_GAP = 4;           // 砖块间隙
+const BRICK_TOP = 60;          // 第一行距顶部距离
+let brickW = 0;                // 砖块宽（下面自动算）
+let bricks = [];               // 二维数组：1 = 还在，0 = 已打掉
+let bricksLeft = 0;            // 剩余砖块数
+
+// 难度递增
+const SPEED_UP_EVERY = 8;      // 每打掉 8 块砖加速一次（间隔拉长）
+const SPEED_STEP = 0.1;        // 每次加速的增量（再调小，避免越玩越失控）
+let lastSpeedUpAt = 0;
+
+// 每行的颜色和分值（越靠上分越高）
+const BRICK_COLORS = ['#e74c3c', '#e67e22', '#f1c40f',
+                      '#2ecc71', '#3498db', '#9b59b6'];
+const ROW_SCORES   = [60, 50, 40, 30, 20, 10];
+
+// 鼠标位置（用于控制挡板横向移动）
+let mouseX = W / 2;
+
+/* ============================================================================
+   3. 初始化类函数
+   ============================================================================ */
+
+// 初始化球：从中间出发，斜着往下飞（朝挡板方向）
+function initBall() {
+  ball.x = W / 2;
+  ball.y = H / 2;
+  // 随机决定最初是往左下还是右下飞
+  ball.vx = Math.random() > 0.5 ? BASE_SPEED : -BASE_SPEED;
+  ball.vy = BASE_SPEED;          // y 为正 = 向下，朝底部挡板飞去
+}
+
+// 初始化挡板：贴底边水平居中
+function initPaddle() {
+  paddle.x = W / 2 - paddle.w / 2;
+  paddle.y = H - paddle.h - 10;  // 贴着屏幕最下方，留 10 像素边距
+}
+
+// 初始化砖块矩阵
+function initBricks() {
+  // 算砖块宽度：总宽 = 画布宽 - 两侧间隙 - 所有砖块之间的间隙
+  brickW = (W - BRICK_GAP * (BRICK_COLS + 1)) / BRICK_COLS;
+
+  bricks = [];
+  for (let r = 0; r < BRICK_ROWS; r++) {
+    bricks[r] = [];
+    for (let c = 0; c < BRICK_COLS; c++) {
+      bricks[r][c] = 1;        // 每块砖初始都是"存在"
+    }
+  }
+  bricksLeft = BRICK_ROWS * BRICK_COLS;
+}
+
+// 重置整局
+function resetGame() {
+  score = 0;
+  lives = 3;
+  lastSpeedUpAt = 0;
+  initBall();
+  initPaddle();
+  initBricks();
+  state = 1;                   // 直接进入游戏中
+}
+
+/* ============================================================================
+   4. 更新逻辑（每帧调用一次）
+   ============================================================================ */
+function update() {
+  if (state !== 1) return;     // 只有"游戏中"才需要更新
+
+  // ---- 4.1 挡板跟随鼠标横向移动（用 clamp 限制在画布内） ----
+  paddle.x = clamp(mouseX - paddle.w / 2, 0, W - paddle.w);
+
+  // ---- 4.2 球前进 ----
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // ---- 4.3 左右边界反弹 ----
+  if (ball.x - ball.size / 2 < 0) {
+    ball.x = ball.size / 2;
+    ball.vx = -ball.vx;
+  }
+  if (ball.x + ball.size / 2 > W) {
+    ball.x = W - ball.size / 2;
+    ball.vx = -ball.vx;
+  }
+
+  // ---- 4.4 顶部墙反弹（底部是失球区） ----
+  if (ball.y - ball.size / 2 < 0) {
+    ball.y = ball.size / 2;
+    ball.vy = -ball.vy;
+  }
+
+  // ---- 4.5 球撞挡板 ----
+  if (ball.y + ball.size / 2 > paddle.y &&
+      ball.y - ball.size / 2 < paddle.y + paddle.h &&
+      ball.x > paddle.x &&
+      ball.x < paddle.x + paddle.w) {
+
+    ball.y = paddle.y - ball.size / 2;      // 顶回挡板上方
+    ball.vy = -Math.abs(ball.vy);           // 强制往上飞
+
+    // 撞点越靠挡板边缘，x 方向偏移越大（让球路有变化，更像真实打砖块）
+    const hitPos = (ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2);
+    ball.vx += hitPos * 1.5;
+  }
+
+  // ---- 4.6 球撞砖块（遍历二维数组） ----
+  brickLoop:                                  // 给外层循环起个标签，方便一次跳出两层
+  for (let r = 0; r < BRICK_ROWS; r++) {
+    for (let c = 0; c < BRICK_COLS; c++) {
+      if (bricks[r][c] !== 1) continue;     // 已经打掉的砖跳过
+
+      const bx = BRICK_GAP + c * (brickW + BRICK_GAP);
+      const by = BRICK_TOP + r * (BRICK_H + BRICK_GAP);
+
+      // 矩形包围盒碰撞检测
+      if (ball.x + ball.size / 2 > bx &&
+          ball.x - ball.size / 2 < bx + brickW &&
+          ball.y + ball.size / 2 > by &&
+          ball.y - ball.size / 2 < by + BRICK_H) {
+
+        bricks[r][c] = 0;         // 砖块消失
+        bricksLeft--;
+        score += ROW_SCORES[r];
+
+        // 比较横向/纵向重叠量，决定翻转哪个方向的速度
+        const overlapX = Math.abs(ball.x - (bx + brickW / 2));
+        const overlapY = Math.abs(ball.y - (by + BRICK_H / 2));
+        if (overlapX > overlapY) ball.vx = -ball.vx;
+        else                     ball.vy = -ball.vy;
+
+        checkSpeedUp();           // 检查是否要加速
+        break brickLoop;          // 一帧只处理一次碰撞，跳出两层循环
+      }
+    }
+  }
+
+  // ---- 4.7 球漏出底部：掉命 ----
+  if (ball.y - ball.size / 2 > H) {
+    lives--;
+    if (lives <= 0) {
+      state = 2;                        // 游戏结束
+      highScore = Math.max(highScore, score);
+    } else {
+      initBall();                       // 还有命，重新发球
+    }
+  }
+
+  // ---- 4.8 砖块全清：通关 ----
+  if (bricksLeft <= 0) {
+    state = 3;
+    highScore = Math.max(highScore, score);
+  }
+}
+
+// 难度递增：打掉的砖块数每跨过一个阈值就加速
+function checkSpeedUp() {
+  const destroyed = BRICK_ROWS * BRICK_COLS - bricksLeft;
+  const level = Math.floor(destroyed / SPEED_UP_EVERY);
+  if (level > lastSpeedUpAt) {
+    lastSpeedUpAt = level;
+    // 保持方向不变，只增加速度大小
+    ball.vx += ball.vx > 0 ? SPEED_STEP : -SPEED_STEP;
+    ball.vy += ball.vy > 0 ? SPEED_STEP : -SPEED_STEP;
+  }
+}
+
+/* ============================================================================
+   5. 绘制类函数
+   ============================================================================ */
+
+// 画全部游戏内容
+function render() {
+  // 清屏（深色背景）
+  ctx.fillStyle = '#1e2029';
+  ctx.fillRect(0, 0, W, H);
+
+  // 画砖块
+  for (let r = 0; r < BRICK_ROWS; r++) {
+    for (let c = 0; c < BRICK_COLS; c++) {
+      if (bricks[r][c] !== 1) continue;
+      const bx = BRICK_GAP + c * (brickW + BRICK_GAP);
+      const by = BRICK_TOP + r * (BRICK_H + BRICK_GAP);
+      ctx.fillStyle = BRICK_COLORS[r];
+      roundRect(bx, by, brickW, BRICK_H, 4);
+      ctx.fill();
+    }
+  }
+
+  // 画挡板
+  ctx.fillStyle = '#ecf0f1';
+  roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 6);
+  ctx.fill();
+
+  // 画球（外圈光晕 + 内圈实心）
+  ctx.fillStyle = 'rgba(255, 220, 100, 0.28)';
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.size, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff0a0';
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.size / 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 顶部信息栏
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '16px "Microsoft YaHei", sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText('分数: ' + score, 15, 25);
+  ctx.textAlign = 'right';
+  ctx.fillText('生命: ' + lives, W - 15, 25);
+  ctx.textAlign = 'left';      // 复原，避免影响后面文字
+
+  // 根据状态叠加开始 / 结束界面
+  if (state === 0) renderStartScreen();
+  if (state === 2) renderOverlay('游戏结束', '#e74c3c');
+  if (state === 3) renderOverlay('通关成功！', '#2ecc71');
+}
+
+// 开始画面
+function renderStartScreen() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = '#ffd966';
+  ctx.font = 'bold 46px "Microsoft YaHei", sans-serif';
+  ctx.fillText('打 砖 块', W / 2, H / 2 - 130);
+
+  ctx.fillStyle = '#c8cede';
+  ctx.font = '18px "Microsoft YaHei", sans-serif';
+  ctx.fillText('移动鼠标左右控制底部挡板', W / 2, H / 2 - 30);
+  ctx.fillText('把球弹上去击碎所有砖块', W / 2, H / 2 + 10);
+  ctx.fillText('每打掉 ' + SPEED_UP_EVERY + ' 块，球速会变快！', W / 2, H / 2 + 50);
+
+  // 闪烁提示：用时间做正弦波动，实现"呼吸"效果
+  const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 350);
+  ctx.fillStyle = 'rgba(255, 220, 100, ' + alpha + ')';
+  ctx.font = 'bold 22px "Microsoft YaHei", sans-serif';
+  ctx.fillText('点击画面开始游戏', W / 2, H / 2 + 145);
+
+  ctx.fillStyle = '#6b7387';
+  ctx.font = '13px "Microsoft YaHei", sans-serif';
+  ctx.fillText('作者：<你的名字>  ·  基于课堂 Pong 作业扩展', W / 2, H - 28);
+}
+
+// 结束 / 通关遮罩
+function renderOverlay(title, color) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = color;
+  ctx.font = 'bold 44px "Microsoft YaHei", sans-serif';
+  ctx.fillText(title, W / 2, H / 2 - 80);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '22px "Microsoft YaHei", sans-serif';
+  ctx.fillText('本次得分: ' + score, W / 2, H / 2);
+  ctx.fillText('最高得分: ' + highScore, W / 2, H / 2 + 40);
+
+  ctx.fillStyle = '#c8cede';
+  ctx.font = '19px "Microsoft YaHei", sans-serif';
+  ctx.fillText('点击画面 / 按 R 重新开始', W / 2, H / 2 + 110);
+}
+
+/* ============================================================================
+   6. 小工具函数
+   ============================================================================ */
+
+// 把 v 限制在 min ~ max 之间
+function clamp(v, min, max) {
+  return v < min ? min : (v > max ? max : v);
+}
+
+// 画圆角矩形（canvas 原生没有，需要自己用 arcTo 拼）
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
+/* ============================================================================
+   7. 输入事件
+   ============================================================================ */
+
+// 鼠标移动：记录 x 坐标（注意要按 canvas 缩放比例换算，兼容高分屏）
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) * (W / rect.width);
+});
+
+// 鼠标点击：开始游戏 / 重玩
+canvas.addEventListener('click', () => {
+  if (state === 0) {
+    state = 1;                       // 开始画面 → 进入游戏
+  } else if (state === 2 || state === 3) {
+    resetGame();                     // 结束/通关 → 重开
+  }
+});
+
+// 触屏支持（手机上也能玩），并阻止滚动
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+}, { passive: false });
+
+// 键盘：空格开始/重玩，R 重新开始
+document.addEventListener('keydown', (e) => {
+  if (e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault();
+    if (state === 0) state = 1;
+    else if (state === 2 || state === 3) resetGame();
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    if (state === 2 || state === 3) resetGame();
+  }
+});
+
+/* ============================================================================
+   8. 启动游戏
+   ============================================================================ */
+
+// 用 requestAnimationFrame 做游戏循环：
+// 浏览器每次刷新屏幕（约每秒 60 次）就会调用一次 loop()
+function loop() {
+  update();        // ① 更新数据
+  render();        // ② 绘制画面
+  requestAnimationFrame(loop);   // ③ 预约下一帧
+}
+
+// 开局初始化
+initBall();
+initPaddle();
+initBricks();
+loop();            // 启动循环
+</script>
+</body>
+</html>
